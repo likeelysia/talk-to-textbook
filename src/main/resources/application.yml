@@ -7,6 +7,14 @@ spring:
   application:
     name: formal-agent
 
+  # ---- 文件上传上限 ----
+  # 不配这段就是 Spring Boot 默认(单文件 1MB / 整请求 10MB)→ 灌教材必报 HTTP 413
+  servlet:
+    multipart:
+      max-file-size: ${FA_MAX_FILE_SIZE:100MB}         # 单个文件
+      max-request-size: ${FA_MAX_REQUEST_SIZE:120MB}   # 整个请求(多图 / 多文件一起算)
+      file-size-threshold: 1MB                         # 超 1MB 就落临时文件,不整个读进堆内存
+
 server:
   port: 8080          # HTTP 接口端口(可用 --server.port=xxxx 覆盖)
 

@@ -46,7 +46,8 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **多图问答**:`POST /api/agent`(multipart)一次可传 **最多 10 张**图 → 逐张视觉识别(按序号合并成一段文字)→ Agent 回答;单张失败自动跳过
 - **接口鉴权**:管理接口(`/api/ingest`)需请求头 `X-Admin-Key`
 - **Prompt 模板外置**:文案在 `resources/prompts/*.txt`
-- **网页前端**:内置单页问答界面(`http://localhost:8080/`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库 / 管理端上传入库
+- **网页前端**:内置单页问答界面(`http://localhost:8080/`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库;
+  教材里没有的内容 → 「点击这里联系开发者」跳转 `/contact.html` 扫码加微信(**入库能力不在用户端暴露**)
 - **多轮对话**:保留历史上下文,与 DeepSeek 循环对话
 - **会话存档**:Java 原生序列化(`.bin`)+ 可读 JSON 导出(`.json`)
 - **结构化输出**:调用时开启 JSON mode(`response_format=json_object`)
@@ -161,6 +162,9 @@ curl -F "file=@C:/资料/物理.pdf" http://localhost:8080/api/ingest
 ```
 
 > 端口的改法:`--server.port=9000`,或改 `application.yml` 的 `server.port`。
+>
+> 上传大小上限:单文件 **100MB**(`FA_MAX_FILE_SIZE`)、整个请求 **120MB**(`FA_MAX_REQUEST_SIZE`),
+> 可在 `application.yml` 或环境变量里覆盖;超 1MB 的请求体会直接落临时文件,不整个读进堆内存。
 
 ---
 
@@ -184,7 +188,8 @@ src/main/java/io/github/likeelysia/formalagent/
 ```
 
 配置在 `src/main/resources/application.yml`(前缀 `fa.*`);
-前端页面在 `src/main/resources/static/`(`index.html` / `app.js` / `style.css`);
+前端页面在 `src/main/resources/static/`(`index.html` / `app.js` / `style.css`,
+联系页 `contact.html` + 二维码 `img/wechat.jpg`);
 提示词在 `src/main/resources/prompts/`。
 
 ---

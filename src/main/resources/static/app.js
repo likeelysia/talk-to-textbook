@@ -279,26 +279,4 @@ async function loadKnowledge() {
     }
 }
 
-/* ---------------- 管理:上传入库 ---------------- */
-
-document.getElementById('ingest').addEventListener('click', async () => {
-    const file = document.getElementById('book').files[0];
-    const key = document.getElementById('adminKey').value.trim();
-    const msg = document.getElementById('ingestMsg');
-
-    if (!file) { msg.textContent = '先选一个文件'; return; }
-    msg.textContent = '上传中…(整本教材可能要几分钟)';
-    try {
-        const fd = new FormData();
-        fd.append('file', file);
-        const res = await fetch('/api/ingest', { method: 'POST', headers: { 'X-Admin-Key': key }, body: fd });
-        if (!res.ok) throw new Error(await readError(res));
-        const data = await res.json();
-        msg.textContent = `入库成功:新增 ${data.added} 条,现有 ${data.total} 条`;
-        loadKnowledge();
-    } catch (e) {
-        msg.textContent = '失败:' + e.message;
-    }
-});
-
 loadKnowledge();

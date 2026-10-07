@@ -127,6 +127,38 @@ button:disabled { opacity: .5; cursor: default; }
 }
 .icon-btn.disabled { opacity: .4; pointer-events: none; }   /* 已选满 10 张,禁用选图 */
 
+/* ---------------- 联系开发者 ---------------- */
+
+.contact-cta p { margin: 0; font-size: 14px; }
+.contact-btn {
+    display: inline-block; margin-left: 6px; padding: 8px 14px;
+    background: var(--brand); color: #fff; border-radius: 10px;
+    font-size: 14px; text-decoration: none; transition: background .15s;
+    white-space: nowrap;
+}
+.contact-btn:hover { background: var(--brand-dark); }
+
+/* 联系页:整页只有二维码 */
+body.contact-page {
+    display: grid; place-items: center; min-height: 100vh; padding: 24px;
+}
+.contact-box {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 28px 24px; max-width: 400px; width: 100%; text-align: center;
+    box-shadow: 0 6px 24px rgba(31, 35, 48, .06);
+}
+.contact-box h1 { margin: 0 0 6px; font-size: 18px; }
+.contact-box .tip { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+.contact-box .qr {
+    display: block; margin: 0 auto; width: 100%; max-width: 320px; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+}
+.contact-box .back {
+    display: inline-block; margin-top: 18px; color: var(--brand);
+    font-size: 14px; text-decoration: none;
+}
+.contact-box .back:hover { text-decoration: underline; }
+
 /* ---------------- 侧栏 ---------------- */
 .side { display: flex; flex-direction: column; gap: 16px; }
 .side h2 { margin: 0 0 10px; font-size: 16px; }
@@ -135,8 +167,3 @@ button:disabled { opacity: .5; cursor: default; }
 .sample { margin: 8px 0 0 18px; padding: 0; font-size: 13px; color: var(--muted); }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
-
-details.card summary { cursor: pointer; font-weight: 600; }
-details.card input { width: 100%; margin: 8px 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
-details.card input[type=file] { padding: 6px; background: #fbfcff; }
-details.card button { width: 100%; }
