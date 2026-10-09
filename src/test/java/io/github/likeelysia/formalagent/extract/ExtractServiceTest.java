@@ -11,6 +11,7 @@ import io.github.likeelysia.formalagent.doc.PlainTextReader;
 import io.github.likeelysia.formalagent.doc.TextSplitter;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.LlmClient;
+import io.github.likeelysia.formalagent.ocr.OcrEngines;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,7 +70,7 @@ class ExtractServiceTest {
         file = tmp.resolve("lesson.md");
         Files.writeString(file, TEXT, StandardCharsets.UTF_8);
         pipeline = new DocPipeline(
-                new ReaderRegistry(new PlainTextReader(), new PdfReader((image, prompt) -> ""),
+                new ReaderRegistry(new PlainTextReader(), new PdfReader(OcrEngines.single(image -> "")),
                         new ImageReader((image, prompt) -> "")),
                 new TextSplitter(20, 5));
     }

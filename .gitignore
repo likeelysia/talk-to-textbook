@@ -51,13 +51,16 @@ secrets/
 
 ### Logs ###
 *.log
-logs/
+/logs/
 
 # 备份文件不入库(*.bak-*)
 *.bak-*
-logs/
-sessions/
+/sessions/
+
 ### 知识库数据(本地生成,不入库)###
-knowledge/
+# ⚠️ 必须锚定仓库根(前导斜杠):写成裸的 knowledge/ 会把源码目录
+#    src/main/java/.../formalagent/knowledge/ 一起忽略,新加的源码文件根本进不了仓库
+/knowledge/
+
 ### 上传的文件(本地数据,不入库)###
-data/
+/data/

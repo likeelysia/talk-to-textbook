@@ -15,7 +15,7 @@
 **中文**:这是我学习 Java 后端 + AI Agent 开发过程中做的第一个开源项目。
 它要把「教材」变成「可问答的知识库」:
 
-1. **入库**:把教材(PDF / 图片 / 文本)读进来 —— 扫描版 PDF 走**视觉模型 OCR**,
+1. **入库**:把教材(PDF / 图片 / 文本)读进来 —— 扫描版 PDF 走 **OCR**(本地 RapidOCR 或视觉模型),
    原生 PDF 直接抽文字层 —— 切块后交给大模型**提取知识点**(带页码出处),落到知识库;
 2. **问答**:给一张图片(或提问),先识别内容,再**从知识库里按语义检索**相关知识点,
    最后让模型**只依据这些知识点**用大白话回答,并**标明出处**;
@@ -35,7 +35,9 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 
 ## 功能特性 / Features
 
-- **文档入库(三种来源)**:`.txt` / `.md` 文本、原生 PDF(文字层)、**扫描版 PDF / 图片(视觉 OCR)**;产出带页码出处的知识点
+- **文档入库(三种来源)**:`.txt` / `.md` 文本、原生 PDF(文字层)、**扫描版 PDF / 图片(OCR)**;产出带页码出处的知识点
+  - OCR 引擎可换:本地 **RapidOCR**(PP-OCRv4,纯 Java/CPU/离线,一页几秒)或 **Kimi 视觉**(能读公式,慢且有限流);
+    本地读糊的页可**自动回退** Kimi 重读(见下方「OCR 引擎」)
 - **语义检索(真 RAG 的第一步)**:知识点 → **embedding 向量**,检索按**余弦相似度**取 top-K;
   embedding 服务不可用时**自动降级**为关键词匹配(不会因此搜不了)
 - **带出处的问答**:图片 → 识图 → 检索 → 「只依据知识点」生成回答 + 【出处】
@@ -44,19 +46,28 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **工具集**:`search_knowledge` / `knowledge_overview` / `get_knowledge_page` / **`calculator`**(自写安全表达式求值器)/ **`unit_convert`**
 - **混合检索 + 阈值**:向量 + 关键词加权;相似度不够就当作“没找到”(`fa.knowledge.min-score`)
 - **多图问答**:`POST /api/agent`(multipart)一次可传 **最多 10 张**图 → 逐张视觉识别(按序号合并成一段文字)→ Agent 回答;单张失败自动跳过
-- **接口鉴权**:管理接口(`/api/ingest`)需请求头 `X-Admin-Key`
+- **接口鉴权**:管理接口(`/api/ingest`、`/api/knowledge/source`)需请求头 `X-Admin-Key`
+- **知识库来源管理(删 / 换)**:可按“哪本书”(来源)整本**删除**或**重灌** —— 
+  `IngestMain --list / --remove-source / --replace` 与 `DELETE /api/knowledge/source` / `POST /api/ingest?replace=true`;
+  灌库漏页(`failedPages`)会记进断点并在下次开跑时自动补灌,详见下方「灌库断点」
+  来源名可以只写一部分,但**只有唯一命中才动手**(歧义/没命中就拒绝并列出候选,避免删错书)
+- **灌库断点(每 40 页落一次盘)+ 漏页兜底**:大教材(扫描件)要 OCR + 提炼一两个小时,中途断了不必从头再来 ——
+  每 `fa.extract.block-size` 页(默认 40)落一次盘,**重跑同一条命令即从上一块续**;`IngestMain --progress` 看灌到哪、`--restart` 推倒重来。
+  OCR 单页失败(限流/图糊)会**记下页号**,下次跑先补灌这几页 —— 不会静默丢页
 - **Prompt 模板外置**:文案在 `resources/prompts/*.txt`
 - **网页前端**:内置单页问答界面(`http://localhost:8080/`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库;
   教材里没有的内容 → 「点击这里联系开发者」跳转 `/contact.html` 扫码加微信(**入库能力不在用户端暴露**)
-- **多轮对话**:保留历史上下文,与 DeepSeek 循环对话
-- **会话存档**:Java 原生序列化(`.bin`)+ 可读 JSON 导出(`.json`)
+- **多会话(对话框)**:默认对话 + 新建 / 改名 / 删除 / 切换;**记忆默认互相隔离**,会话以 JSON 落盘(`data/conversations/`)
+- **多轮上下文(短期记忆)**:模型每次都能看到“这个会话之前聊过什么” —— 自动带**最近几轮原文**,
+  超出窗口的旧对话压成**滚动摘要**(`fa.memory.short-term.*`);摘要失败有本地兜底,历史不白丢
+- **会话存档**:JSON(`data/conversations/`,一个会话一个文件)+ 老的 Java 原生序列化(`.bin`,CLI 用)
 - **结构化输出**:调用时开启 JSON mode(`response_format=json_object`)
 - **健壮性**:超时 + **重试 + 退避**(Spring Retry / AOP);音频类长任务失败可跳过
 - **配置**:`application.yml` + `@ConfigurationProperties`(类型安全)+ **profile**
 - **调用日志**:按天滚动到 `logs/api-YYYY-MM-DD.log`(经 SLF4J/Logback)
-- **HTTP 接口(REST)**:`POST /api/qa`、`POST /api/ingest`、`GET /api/knowledge`、`GET /api/health`
+- **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`GET /api/health`
 - **Spring Boot 工程化**:可执行 fat jar(`java -jar`)、内嵌 Tomcat、内嵌日志(SLF4J/Logback)
-- **单元测试**:**74 个**,含 Boot 容器冒烟测试与配置绑定测试(不联网、秒级)
+- **单元测试**:**225 个**,含 Boot 容器冒烟测试与配置绑定测试(不联网、秒级)
 
 ---
 
@@ -71,9 +82,10 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 | Spring Retry | (Boot BOM 管) | 声明式重试(`@Retryable` + AOP) |
 | Jackson | (Boot BOM 管) | JSON 序列化 / 反序列化 |
 | Apache PDFBox | 3.0.8 | PDF 文字层提取 + 逐页渲染(供 OCR) |
+| RapidOCR(onnxruntime) | 0.0.7 | **本地 OCR**(PP-OCRv4,CPU/离线,自带 native 库与模型) |
 | JUnit | (Boot BOM 管) | 单元测试 |
 | **DeepSeek** | `deepseek-chat` | 文本对话 / 知识点提炼 |
-| **Kimi 视觉** | `kimi-k2.6` | 扫描件 OCR / 图片理解(请求里关闭"思考模式") |
+| **Kimi 视觉** | `kimi-k2.6` | 扫描件 OCR(可当本地 OCR 的兑底)/ 图片理解(请求里关闭"思考模式") |
 | **本地 embedding** | `bge-small-zh-v1.5` | 经 llama.cpp `llama-server` 提供 OpenAI 兼容接口 |
 
 ---
@@ -106,7 +118,7 @@ start-embedding.bat          # 起在 http://127.0.0.1:8090
 ### 构建与运行
 
 ```bash
-mvn clean test               # 跑测试(99 个)
+mvn clean test               # 跑测试(170 个)
 mvn clean package            # 打包 → target/formal-agent-0.1.0-SNAPSHOT.jar
 
 # 【默认】启动 HTTP 服务(内嵌 Tomcat,端口 8080)
@@ -132,8 +144,42 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 - **粘图片(`.png` / `.jpg`)** = 识别图片 → **对照知识库回答(带出处)**
 - 输入 `exit` 退出(自动存档会话)
 
-> 批量入库(把教材灌进 `knowledge/base.json`)目前用 `cli.IngestMain`,在 IDEA 里运行;
-> 后续会做成 HTTP 接口(见路线图)。
+> **批量入库 / 清单 / 删除**都用 `cli.IngestMain`(带 Boot 的命令行,不起 Tomcat):
+>
+> ```
+> IngestMain --list                        列出知识库各来源及条数
+> IngestMain --progress                    查看灌库断点(灌到第几页、还有哪几页没灌成功)
+> IngestMain <教材文件>...                 导入(默认带断点:每 40 页落一次盘,断了重跑即续)
+> IngestMain --replace <教材文件>          重灌:先删该来源旧条目,再导入
+> IngestMain --restart <教材文件>          忽略旧断点,从第 1 页重来
+> IngestMain --remove-source <来源名>      按来源删除(可只写文件名的一部分)
+> ```
+>
+> 📌 **灌大书(扫描件)必备**:一本 400 页的扫描件要 OCR + 提炼一两个小时,没有断点中途一挂就得从头再来。
+> 现在每 `fa.extract.block-size` 页(默认 **40**)落一次盘:断了就**重跑同一条命令**,已灌过的页不会重来;
+> `--progress` 随时看灌到哪了。断点粒度可用环境变量 `FA_INGEST_BLOCK_SIZE` 调,进度文件在 `FA_CHECKPOINT_DIR`(默认 `data/checkpoints`)。
+>
+> 🔁 **漏页兜底**:扫描件走 OCR 时单页可能失败(比如接口限流)—— 这套机制**不会把失败页静默丢掉**:
+> 失败的页号会记进断点文件,下次跑同一条命令时**先补灌这几页**(补一页落一次盘),补上即划掉;
+> 一直补不上的页也不阻塞,只在 `--progress` 里列出来。所以 OCR 打嗝不用整本重来。
+>
+> 🔤 **OCR 引擎**(`fa.ocr.engine`,可用环境变量 `FA_OCR_ENGINE` 覆盖):
+> - `kimi`(默认)—— 远程视觉模型,慢(约 10~17 秒/页)但**能把公式读成 LaTeX**;受 Moonshot 组织级 3 RPM 限制,
+>   撞 429 就把 `fa.ocr.kimi.page-gap-ms`(环境变量 `FA_OCR_PAGE_GAP_MS`)调大 ——
+>   它的语义是「两次调用的开始时刻至少隔这么久」,想稳在 3 次/分钟以内就设 `21000`
+> - `rapid` —— 本地 PP-OCRv4,**约 3 秒/页、离线、零成本**;中文正文质量跟视觉模型相当,
+>   但**公式/化学式会读乱**(公式密集的理科书建议仍用 kimi,或配合回退使用)
+> - 两者可组合:`fa.ocr.fallback-to-kimi`(默认 `true`)在 `rapid` 读得可疑时自动换 kimi 重读那一页
+> - 阈值:`fa.ocr.quality.min-chars`(默认 30)、`fa.ocr.quality.min-chinese-ratio`(默认 0.2)
+> - **去噪**:`fa.ocr.watermark-lines`(默认 `夸克扫描王,极速扫描,就是高效`)—— OCR 结果里有行含这些关键字就整行丢掉,
+>   免得扫描 App 的水印变成知识点;留空 = 不过滤
+> - **空白页不算失败**:读出来是空的(封面/白纸/篇扉页)会拿页图复核,墨迹 < 2% 就当「本来就没字」;
+>   真有东西没读出来才记漏页、下次补灌
+>
+>
+> ⚠️ 应用正在跑的时候,请改用 REST(`POST /api/ingest?replace=true` / `DELETE /api/knowledge/source?name=...`):
+> 运行中的进程把知识库全放在内存里,直接改磁盘文件会被它下一次写盘盖回去。
+> 若终端里中文显示成 `?`,给 java 加 `-Dstdout.encoding=UTF-8` 或到 IDEA 里跑。
 
 ---
 
@@ -143,16 +189,26 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 
 | 方法 & 路径 | 作用 | 请求体示例 |
 |---|---|---|
-| `POST /api/agent` | **Agent 问答**(模型自己决定调哪些工具) | `{"question":"位移是多少?"}` → 返回 `answer` + `steps` + `trace` |
-| `POST /api/agent`(multipart) | **多图问答**:最多 10 张,逐张识别 → Agent 回答 | `files=@图1.png` `files=@图2.png`(+ 可选 `question`) |
-| `POST /api/ingest` | 教材入库(管理端)—— **上传文件**,不收“路径” | `multipart/form-data`,`file=@物理.pdf` |
-| `GET /api/knowledge` | 知识库概况 | `?sample=5` |
+| `POST /api/agent` | **Agent 问答**(模型自己决定调哪些工具) | `{"question":"位移是多少?","conversationId":"default"}` → 返回 `answer` + `steps` + `trace` + `conversationId`(`conversationId` 可省) |
+| `POST /api/agent`(multipart) | **多图问答**:最多 10 张,逐张识别 → Agent 回答 | `files=@图1.png` `files=@图2.png`(+ 可选 `question` / `conversationId`) |
+| `GET /api/conversations` | **会话(对话框)列表** + 默认会话 id | — |
+| `POST /api/conversations` | 新建会话 | `{"title":"物理复习"}`(可省) |
+| `GET /api/conversations/{id}` | 读某个会话的完整聊天记录 | — |
+| `PATCH /api/conversations/{id}` | 给会话改名 | `{"title":"新名字"}` |
+| `DELETE /api/conversations/{id}` | 删除会话(默认对话不许删) | — |
+| `POST /api/ingest` | 教材入库(管理端,需 `X-Admin-Key`)—— **上传文件**,不收“路径” | `multipart/form-data`,`file=@物理.pdf`;加 `?replace=true` 则**先删同来源旧条目再入库** |
+| `DELETE /api/knowledge/source` | 按来源删除(管理端,需 `X-Admin-Key`);`name` 可只写一部分,**唯一命中才删** | `?name=物理` |
+| `GET /api/knowledge` | 知识库概况(总数 / 来源清单 / **各来源条数** / 抽样) | `?sample=5` |
 | `GET /api/health` | 健康检查 | — |
 
 ```powershell
 # 问一句(Agent 自己决定要不要查、查几次)
 curl -X POST http://localhost:8080/api/agent -H "Content-Type: application/json" ^
      -d "{\"question\":\"沿闭合曲线跑一圈回到原点,位移是多少?\"}"
+
+# 新建一个对话,再往它里问(不带 conversationId 就落到"默认对话")
+curl -X POST http://localhost:8080/api/conversations -H "Content-Type: application/json" -d "{}"
+curl http://localhost:8080/api/conversations
 
 # 看知识库
 curl http://localhost:8080/api/knowledge?sample=3
@@ -173,13 +229,16 @@ curl -F "file=@C:/资料/物理.pdf" http://localhost:8080/api/ingest
 ```
 src/main/java/io/github/likeelysia/formalagent/
 ├── FormalAgentApplication.java   # Spring Boot 启动类
-├── chat/       # ChatSession、Message —— 会话与消息
+├── chat/       # ChatSession、Message —— 命令行时代的会话与消息(保留)
+├── conversation/ # Conversation / ChatMessage / ConversationStore(JSON 落盘)/ ConversationService —— 多会话(对话框)
+├── memory/     # ShortTermMemory(窗口裁剪)+ SessionSummarizer —— 短期记忆(最近几轮 + 滚动摘要)
 ├── cli/        # ChatCli(交互式命令行,CommandLineRunner)、IngestMain、ExtractMain、FileHint
 ├── config/     # AppConfig(@ConfigurationProperties)、SpringConfig —— 配置与容器装配
 ├── doc/        # DocumentReader / PlainTextReader / PdfReader(文字层+OCR) / ImageReader / TextSplitter / DocPipeline
 ├── extract/    # KnowledgeExtractor / ExtractService / IngestService / KnowledgeReport —— 提取与入库
 ├── llm/        # LlmClient、VisionClient、EmbeddingClient(+ 各自实现与 dto/)
 ├── knowledge/  # KnowledgeItem / KnowledgeStore / JsonKnowledgeStore —— 知识库与向量检索
+├── ocr/        # OcrEngine 接口 + KimiOcrEngine(远程视觉) / RapidOcrEngine(本地 PP-OCR) + OcrEngines(选引擎/回退)
 ├── log/        # ApiLogger —— 模型调用审计日志
 ├── agent/      # Agent 主循环(ReAct)+ 工具(Tool 接口 / search_knowledge / knowledge_overview / get_knowledge_page)
 ├── service/    # ChatService(对话)、QaService(图片问答)、FileStorage(上传落盘)
@@ -216,7 +275,7 @@ variables, and `.gitignore` blocks common secret files as well as generated data
 - [x] 结构化输出(JSON mode)
 - [x] 超时 + 重试 + 退避(Spring Retry)
 - [x] 知识库(接口 `KnowledgeStore`)+ 入库流水线(带页码出处)
-- [x] 扫描版 PDF / 图片 OCR(Kimi 视觉)
+- [x] 扫描版 PDF / 图片 OCR(远程视觉模型 + **本地 RapidOCR** 可切换,支持差页回退)
 - [x] 图片问答(识图 → 检索 → 带出处回答)
 - [x] **真检索:embedding + 余弦相似度 top-K**(本地 llama.cpp)
 - [x] **Spring Boot 化:可执行 jar / `@ConfigurationProperties` / profile**
@@ -230,10 +289,11 @@ variables, and `.gitignore` blocks common secret files as well as generated data
 - [x] **多图提问**(一次最多 10 张;上传前浏览器内自动压图,缩略图可逐张删除)
 - [x] **管理接口鉴权**(`X-Admin-Key`)
 - [x] **Prompt 模板外置**(`resources/prompts/*.txt`)
+- [x] **知识库来源管理:按来源删除 / 重灌**(CLI `--list/--remove-source/--replace` + REST `DELETE /api/knowledge/source`)
+- [x] **多会话(对话框)+ 会话管理**:默认对话 + 新建/改名/删除/切换,记忆默认互相隔离(REST `/api/conversations`)
+- [x] **多轮上下文(短期记忆)**:最近 N 轮原文 + 超窗口的**滚动摘要**,模型终于“记得”上一句(`fa.memory.short-term.*`)
 - [ ] 更多工具(联网搜索 —— 需配 Prompt Injection 防护)
 - [ ] 向量库(知识到 10 万条量级再上)
-- [ ] 向量库 / 阈值 + hybrid(向量 + 关键词)
-- [ ] Prompt 模板外置
 
 ---
 

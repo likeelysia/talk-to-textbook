@@ -54,6 +54,8 @@
     <!-- ========== 编译参数(Boot 父工程据此设置编译 release) ========== -->
     <properties>
         <java.version>17</java.version>
+        <!-- 本地 OCR(RapidOCR):Boot BOM 不管,自己写版本 -->
+        <rapidocr.version>0.0.7</rapidocr.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     </properties>
@@ -94,6 +96,26 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>3.0.8</version>
+        </dependency>
+
+        <!-- 本地 OCR:RapidOCR(纯 Java 调 onnxruntime,PP-OCRv4 中文模型,CPU 跑,离线) -->
+        <!-- 核心库;slf4j-api 排除掉,用 Spring Boot 自带的那份,免得版本打架 -->
+        <dependency>
+            <groupId>io.github.mymonstercat</groupId>
+            <artifactId>rapidocr</artifactId>
+            <version>${rapidocr.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- 平台适配包:按当前系统自动带 native 库 + 模型(windows-x86_64 走 onnx) -->
+        <dependency>
+            <groupId>io.github.mymonstercat</groupId>
+            <artifactId>rapidocr-onnx-platform</artifactId>
+            <version>${rapidocr.version}</version>
         </dependency>
 
         <!-- 测试:JUnit 5 + AssertJ + Mockito + spring-test 全家桶 -->

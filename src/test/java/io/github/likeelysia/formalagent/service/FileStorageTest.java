@@ -22,7 +22,7 @@ class FileStorageTest {
 
     private FileStorage storage() {
         AppConfig config = new AppConfig(false, null, null, null, null,
-                new AppConfig.Upload(tmp.toString()));
+                new AppConfig.Upload(tmp.toString()), null, null);
         return new FileStorage(config);
     }
 

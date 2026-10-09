@@ -14,11 +14,21 @@
 </header>
 
 <main>
+    <!-- ==================== 会话栏 ==================== -->
+    <aside class="convs card">
+        <div class="convs-head">
+            <h2>对话</h2>
+            <button id="newConv" type="button" class="mini new" title="新建一个对话(记忆独立)">＋ 新建</button>
+        </div>
+        <div id="convList" class="conv-list">加载中…</div>
+        <p class="conv-note muted small">每个对话的记忆互相独立。</p>
+    </aside>
+
     <!-- ==================== 对话区 ==================== -->
     <section class="card chat">
         <div id="messages" class="messages">
             <div class="bubble bot">
-                你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。
+                你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。每个对话各自独立记忆,想另起一个话题就点左上角「＋ 新建」。
             </div>
         </div>
 

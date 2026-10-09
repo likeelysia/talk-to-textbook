@@ -3,7 +3,8 @@ package io.github.likeelysia.formalagent.doc;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.github.likeelysia.formalagent.llm.VisionClient;
+import io.github.likeelysia.formalagent.ocr.OcrEngine;
+import io.github.likeelysia.formalagent.ocr.OcrEngines;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -20,11 +21,11 @@ class PdfReaderTest {
 
     @TempDir Path tmp;
 
-    /** 假视觉客户端(不联网) */
-    private final VisionClient fakeVision = (image, prompt) -> "OCR 出来的文字";
+    /** 假 OCR(不联网) */
+    private final OcrEngine fakeOcr = image -> "OCR 出来的文字";
 
     private PdfReader reader() {
-        return new PdfReader(fakeVision);
+        return new PdfReader(OcrEngines.single(fakeOcr));
     }
 
     /** 造一个 2 页、有文字层的 PDF */

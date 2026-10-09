@@ -23,7 +23,9 @@ public record AppConfig(
         Deepseek deepseek,
         Vision vision,
         Embedding embedding,
-        Upload upload) {
+        Upload upload,
+        Conversation conversation,
+        Memory memory) {
 
     /** 调用 LLM 的通用参数(超时 / 重试)。 */
     public record Llm(int requestTimeoutSeconds, int connectTimeoutSeconds,
@@ -44,5 +46,23 @@ public record AppConfig(
 
     /** 上传文件落盘目录(客户端上传的教材存这里)。 */
     public record Upload(String dir) {
+    }
+
+    /** 会话(对话框)落盘目录:一个会话一个 JSON + 一份 index.json。 */
+    public record Conversation(String dir) {
+    }
+
+    /** 记忆:短期 = 会话内“最近几轮 + 滚动摘要”(批次 B);长期 = 待后续批次。 */
+    public record Memory(ShortTerm shortTerm) {
+
+        /**
+         * 短期记忆的窗口参数。
+         *
+         * @param maxTurns  最多带最近几轮原文(一个“轮”≈ 一条用户提问 + 它的回答);<=0 = 不按轮数限
+         * @param maxChars  原文总字符预算(中文 1 字 ≈ 1~2 token,6000 字量级对上下文很轻松);<=0 = 不限
+         * @param summarize 超出窗口的部分要不要压成滚动摘要(不压 = 直接丢,只留最近几轮)
+         */
+        public record ShortTerm(int maxTurns, int maxChars, boolean summarize) {
+        }
     }
 }

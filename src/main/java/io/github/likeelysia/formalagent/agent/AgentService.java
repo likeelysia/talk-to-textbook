@@ -50,14 +50,30 @@ public class AgentService {
         }
     }
 
-    /** 跑一轮 ReAct:思考 → 调工具 → 再思考 → … 直到给出答案(或撞上步数上限)。 */
+    /** 跑一轮 ReAct(不带历史上下文)。 */
     public AgentResult run(String question) {
+        return run(question, List.of());
+    }
+
+    /**
+     * 跑一轮 ReAct:思考 → 调工具 → 再思考 → … 直到给出答案(或撞上步数上限)。
+     *
+     * @param history 这个会话“之前聊过什么”(滚动摘要 + 最近几轮)。插入位置很讲究:
+     *                <b>系统提示词之后、当前提问之前</b> —— 放最前面会把系统规则顶掉,
+     *                放最后又会被模型当成“用户刚说的话”。历史里只回放 role + 文本,
+     *                <b>不重放旧的 tool_calls</b>:工具调用消息必须和它的 tool_call_id 结果成对出现,
+     *                少一条 API 直接报错。
+     */
+    public AgentResult run(String question, List<AgentMessage> history) {
         if (question == null || question.isBlank()) {
             throw new AgentException("问题不能为空");
         }
 
         List<AgentMessage> messages = new ArrayList<>();
         messages.add(AgentMessage.system(Prompts.get("agent-system")));
+        if (history != null && !history.isEmpty()) {
+            messages.addAll(history);
+        }
         messages.add(AgentMessage.user(question));
 
         List<ToolDefinition> definitions = tools.values().stream().map(Tool::definition).toList();

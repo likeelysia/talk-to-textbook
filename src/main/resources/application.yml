@@ -41,6 +41,30 @@ fa:
     model: kimi-k2.6
     max-tokens: 4096
 
+  # ---- OCR 引擎(扫描件/影印版 PDF 用)----
+  #   engine: kimi(远程视觉模型,准、能读公式,但慢且有组织级 3 RPM 限流)
+  #           rapid(本地 RapidOCR/PP-OCRv4,快、离线、零成本,公式是弱项)
+  ocr:
+    engine: ${FA_OCR_ENGINE:kimi}
+    # 本地读得可疑(或直接失败)时,自动换 kimi 把这一页重读一遍
+    fallback-to-kimi: ${FA_OCR_FALLBACK_KIMI:true}
+    kimi:
+      # 页间最小间隔(毫秒):语义是「两次调用的开始时刻至少相隔这么久」
+      #   默认 1500 = 只躲「组织并发 = 1」;撞 429(组织级 3 RPM)时调成 21000(60 秒内最多 3 次)
+      page-gap-ms: ${FA_OCR_PAGE_GAP_MS:1500}
+    # 去噪:OCR 结果里只要有一行包含其中任一关键字,整行丢掉(扫描 App 的水印)
+    #   逗号 / 分号 / 竖线分隔;留空 = 不过滤
+    watermark-lines: ${FA_OCR_WATERMARK_LINES:夸克扫描王,极速扫描,就是高效}
+    rapid:
+      # CPU 线程数;<=0 = 按机器核数自动
+      num-threads: ${FA_OCR_THREADS:0}
+      # 按长边缩放;0 = 不缩放(最清晰也最慢)
+      max-side-len: ${FA_OCR_MAX_SIDE_LEN:0}
+    # “体检”阈值:不达标就认为本地读糊了 → 回退 kimi
+    quality:
+      min-chars: ${FA_OCR_MIN_CHARS:30}
+      min-chinese-ratio: ${FA_OCR_MIN_CHINESE_RATIO:0.2}
+
   # ---- 本地 embedding 服务(llama.cpp llama-server)----
   embedding:
     url: ${FA_EMBEDDING_URL:http://127.0.0.1:8090}
@@ -56,10 +80,32 @@ fa:
   upload:
     dir: ${FA_UPLOAD_DIR:data/uploads}
 
-  # ---- 教材切块 ----
+  # ---- 会话(对话框):一个会话一个 JSON 文件 + 一份 index.json 列表 ----
+  conversation:
+    dir: ${FA_CONVERSATION_DIR:data/conversations}
+
+  # ---- 记忆(短期 = 会话内上下文窗口 + 滚动摘要)----
+  #   模型本身不会“记得”上一句 —— 每次请求都得把“之前聊过什么”重新喂给它。
+  #   全量喂会越聊越贵(而且越聊越跑题),所以只带“最近几轮原文”,更早的压成一段摘要。
+  memory:
+    short-term:
+      # 最多带最近几轮原文(1 轮 = 一条提问 + 它的回答)
+      max-turns: ${FA_MEMORY_MAX_TURNS:6}
+      # 原文的字符预算(粗略≈token;中文 1 字 ≈ 1~2 token)
+      max-chars: ${FA_MEMORY_MAX_CHARS:6000}
+      # 被挤出窗口的旧对话:true = 压成滚动摘要(存进会话的 summary);false = 直接丢
+      summarize: ${FA_MEMORY_SUMMARIZE:true}
+
+  # ---- 教材切块 / 灌库断点 ----
   extract:
     chunk-size: 800
     overlap: 100
+    # 灌库断点粒度:每 N 页完成一次“提炼 + 落盘”(断了重跑就从这里续)
+    block-size: ${FA_INGEST_BLOCK_SIZE:40}
+
+  # ---- 灌库断点(进度文件)目录 ----
+  checkpoint:
+    dir: ${FA_CHECKPOINT_DIR:data/checkpoints}
 
   # ---- 图片问答检索条数 ----
   qa:

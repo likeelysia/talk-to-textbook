@@ -19,6 +19,8 @@ const imgCountEl = document.getElementById('imgCount');
 const previewMsgEl = document.getElementById('previewMsg');
 const clearBtn = document.getElementById('clearImages');
 const sendBtn = document.getElementById('send');
+const convListEl = document.getElementById('convList');
+const newConvBtn = document.getElementById('newConv');
 
 /* ---------------- 可调参数 ---------------- */
 
@@ -33,6 +35,15 @@ const KEEP_AS_IS_BYTES = 512 * 1024;         // 又小又不超长边的图,不�
  * ⚠️ url 是 URL.createObjectURL 产生的,**不用了必须 revoke**,否则内存泄漏。
  */
 let picked = [];
+
+/* ---------------- 会话状态 ---------------- */
+
+/** 当前会话 id:存在 localStorage,刷新页面还停在原来那个框 */
+const CONV_STORAGE_KEY = 'fa.conversationId';
+let currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
+let defaultConversationId = 'default';
+
+const GREETING = '你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。每个对话各自独立记忆,想另起一个话题就点左上角「＋ 新建」。';
 
 /* ---------------- 小工具 ---------------- */
 
@@ -189,6 +200,168 @@ imagesEl.addEventListener('change', async () => {
 
 clearBtn.addEventListener('click', () => { setHint(''); clearPicked(); });
 
+/* ---------------- 会话(对话框) ---------------- */
+
+/** 统一的 JSON 请求:非 2xx 就把后端给的 {"error":"..."} 抛出来。 */
+async function apiJson(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(await readError(res));
+    return res.json();
+}
+
+/** 拉会话列表;preferredId 不存在(比如删掉了)就回落到默认会话。 */
+async function loadConversations(preferredId) {
+    let data;
+    try {
+        data = await apiJson('/api/conversations');
+    } catch (e) {
+        convListEl.textContent = '加载失败:' + e.message;
+        return;
+    }
+    const convs = data.conversations || [];
+    defaultConversationId = data.defaultId || 'default';
+
+    const want = preferredId || currentConversationId;
+    currentConversationId = convs.some(c => c.id === want) ? want : defaultConversationId;
+    localStorage.setItem(CONV_STORAGE_KEY, currentConversationId);
+
+    renderConversationList(convs);
+}
+
+function renderConversationList(convs) {
+    convListEl.innerHTML = '';
+    convs.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'conv-item' + (c.id === currentConversationId ? ' active' : '');
+
+        // 用 textContent 而不是 innerHTML —— 标题是用户自己输入的,不能当 HTML 解析(XSS)
+        const title = document.createElement('button');
+        title.type = 'button';
+        title.className = 'conv-title';
+        title.textContent = c.title || '(无标题)';
+        title.title = `${c.title || ''}(${c.messageCount} 条)`;
+        title.addEventListener('click', () => switchConversation(c.id));
+
+        const tools = document.createElement('span');
+        tools.className = 'conv-tools';
+
+        const rename = document.createElement('button');
+        rename.type = 'button';
+        rename.className = 'mini';
+        rename.textContent = '✎';
+        rename.title = '重命名';
+        rename.addEventListener('click', (e) => { e.stopPropagation(); renameConversation(c); });
+        tools.append(rename);
+
+        if (c.id !== defaultConversationId) {          // 默认对话留着兜底,不给删
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'mini danger';
+            del.textContent = '×';
+            del.title = '删除这个对话';
+            del.addEventListener('click', (e) => { e.stopPropagation(); deleteConversation(c); });
+            tools.append(del);
+        }
+
+        item.append(title, tools);
+        convListEl.appendChild(item);
+    });
+}
+
+/** 切到另一个对话:先记住,再把它的聊天记录画出来。 */
+async function switchConversation(id) {
+    if (id === currentConversationId) return;
+    currentConversationId = id;
+    localStorage.setItem(CONV_STORAGE_KEY, id);
+    await loadConversations(id);
+    await loadThread(id);
+}
+
+function renderStoredMessage(m) {
+    if (m.role === 'user') {
+        addBubble('user', `<div>${escapeHtml(m.content)}</div>`);
+    } else if (m.role === 'assistant') {
+        const trace = m.trace || [];
+        addBubble('bot', renderAnswer({ answer: m.content, trace, steps: trace.length }));
+    }
+}
+
+/** 读某个对话的历史,画进消息区(空对话就显示欢迎语)。 */
+async function loadThread(id) {
+    let conv;
+    try {
+        conv = await apiJson('/api/conversations/' + encodeURIComponent(id));
+    } catch (e) {
+        messagesEl.innerHTML = '';
+        addBubble('bot error', '聊天记录读不出来:' + escapeHtml(e.message));
+        return;
+    }
+
+    messagesEl.innerHTML = '';
+    const msgs = conv.messages || [];
+    if (!msgs.length) {
+        addBubble('bot', GREETING);
+    } else {
+        msgs.forEach(renderStoredMessage);
+    }
+}
+
+async function newConversation() {
+    try {
+        const created = await apiJson('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        currentConversationId = created.id;
+        localStorage.setItem(CONV_STORAGE_KEY, created.id);
+        await loadConversations(created.id);
+        await loadThread(created.id);
+        questionEl.focus();
+    } catch (e) {
+        window.alert('新建对话失败:' + e.message);
+    }
+}
+
+async function renameConversation(conv) {
+    const name = window.prompt('重命名这个对话:', conv.title || '');
+    if (name === null) return;                        // 点了取消
+    const title = name.trim();
+    if (!title) return;
+    try {
+        await apiJson('/api/conversations/' + encodeURIComponent(conv.id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title })
+        });
+        await loadConversations(conv.id);
+    } catch (e) {
+        window.alert('重命名失败:' + e.message);
+    }
+}
+
+async function deleteConversation(conv) {
+    if (!window.confirm(`删除对话「${conv.title || ''}」?里面的聊天记录会跟着删掉。`)) return;
+    try {
+        await apiJson('/api/conversations/' + encodeURIComponent(conv.id), { method: 'DELETE' });
+        if (conv.id === currentConversationId) {
+            currentConversationId = defaultConversationId;
+        }
+        await loadConversations(currentConversationId);
+        await loadThread(currentConversationId);
+    } catch (e) {
+        window.alert('删除失败:' + e.message);
+    }
+}
+
+newConvBtn.addEventListener('click', newConversation);
+
+/** 首次进页面:先拿列表(决定停在哪个对话),再画它的记录。 */
+async function initConversations() {
+    await loadConversations();
+    await loadThread(currentConversationId);
+}
+
 /* ---------------- 提问 ---------------- */
 
 function bubbleThumbsHtml() {
@@ -234,9 +407,16 @@ formEl.addEventListener('submit', async (e) => {
     } catch (err) {
         bubble.className = 'bubble bot error';
         bubble.textContent = '出错了:' + err.message;
+        // 会话在后端被删了(比如另一个标签页删的)-> 悄悄回落到默认对话,别让人卡死
+        if (String(err.message).includes('会话不存在')) {
+            currentConversationId = defaultConversationId;
+            localStorage.setItem(CONV_STORAGE_KEY, currentConversationId);
+            await loadConversations(currentConversationId);
+        }
     } finally {
         clearInterval(timer);
         sendBtn.disabled = false;
+        loadConversations(currentConversationId);      // 首条提问会自动改标题,刷新一下列表
     }
 });
 
@@ -246,7 +426,7 @@ async function askText(question) {
     const res = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ question, conversationId: currentConversationId })
     });
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
@@ -256,6 +436,7 @@ async function askImages(files, question) {
     const fd = new FormData();
     files.forEach(f => fd.append('files', f));     // 字段名统一叫 files(可重复)
     if (question) fd.append('question', question);
+    fd.append('conversationId', currentConversationId);   // 记到当前这个框里
     // 注意:用 FormData 时千万不要自己设 Content-Type,
     //       浏览器会自动带上 multipart 的 boundary
     const res = await fetch('/api/agent', { method: 'POST', body: fd });
@@ -280,3 +461,4 @@ async function loadKnowledge() {
 }
 
 loadKnowledge();
+initConversations();

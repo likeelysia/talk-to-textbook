@@ -29,15 +29,25 @@ header h1 { margin: 0; font-size: 26px; }
 .sub { margin: 4px 0 0; color: var(--muted); }
 
 main {
-    max-width: 1100px;
+    max-width: 1280px;
     margin: 0 auto;
     padding: 16px 24px 40px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 20px;
+    grid-template-columns: 230px minmax(0, 1fr) 300px;
+    gap: 16px;
     align-items: start;
 }
-@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+/* 屏幕变窄:会话栏缩成一条,知识库挪到下面一行 */
+@media (max-width: 1150px) {
+    main { grid-template-columns: 210px minmax(0, 1fr); }
+    aside.side { grid-column: 1 / -1; flex-direction: row; }
+    aside.side > .card { flex: 1; }
+}
+@media (max-width: 860px) {
+    main { grid-template-columns: 1fr; }
+    aside.side { flex-direction: column; }
+    .conv-list { max-height: 30vh; }
+}
 
 .card {
     background: var(--card);
@@ -158,6 +168,35 @@ body.contact-page {
     font-size: 14px; text-decoration: none;
 }
 .contact-box .back:hover { text-decoration: underline; }
+
+/* ---------------- 会话栏(对话框列表) ---------------- */
+.convs { display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; }
+.convs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.convs-head h2 { margin: 0; font-size: 15px; }
+.conv-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 58vh; }
+.conv-item {
+    display: flex; align-items: center; gap: 6px;
+    border-radius: 9px; padding: 6px 8px; border: 1px solid transparent;
+}
+.conv-item:hover { background: #f3f5fb; }
+.conv-item.active { background: #eef1fe; border-color: #d6ddff; }
+.conv-title {
+    flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: left;
+    color: var(--text); font-size: 14px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conv-item.active .conv-title { color: var(--brand-dark); font-weight: 600; }
+.conv-tools { display: none; gap: 2px; }
+.conv-item:hover .conv-tools, .conv-item.active .conv-tools { display: flex; }
+.mini {
+    padding: 2px 7px; font-size: 12px; line-height: 1.6; border-radius: 7px;
+    background: #fff; color: var(--muted); border: 1px solid var(--line); cursor: pointer;
+}
+.mini:hover { background: var(--brand); color: #fff; border-color: var(--brand); }
+.mini.danger:hover { background: var(--error); border-color: var(--error); }
+.mini.new { background: var(--brand); color: #fff; border-color: var(--brand); }
+.mini.new:hover { background: var(--brand-dark); }
+.conv-note { margin: 2px 0 0; line-height: 1.5; }
 
 /* ---------------- 侧栏 ---------------- */
 .side { display: flex; flex-direction: column; gap: 16px; }

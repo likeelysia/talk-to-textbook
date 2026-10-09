@@ -4,15 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.github.likeelysia.formalagent.agent.AgentResult;
-import io.github.likeelysia.formalagent.agent.AgentService;
+import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.VisionClient;
+import io.github.likeelysia.formalagent.service.AssistantService;
 import io.github.likeelysia.formalagent.service.FileStorage;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,7 +38,7 @@ import org.springframework.web.multipart.MultipartFile;
 class AgentControllerTest {
 
     @Mock
-    private AgentService agentService;
+    private AssistantService assistant;
 
     @Mock
     private VisionClient vision;
@@ -44,12 +46,18 @@ class AgentControllerTest {
     @Mock
     private FileStorage fileStorage;
 
+    @Mock
+    private ConversationService conversations;
+
     private AgentController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AgentController(agentService, vision, fileStorage);
-        when(agentService.run(anyString())).thenReturn(new AgentResult("答案", List.of("search_knowledge({})"), 1));
+        controller = new AgentController(assistant, vision, fileStorage, conversations);
+        // 会话 id 原样透传(不 stub 的话拿到的会是 null,后面断言看不出 id 错没错)
+        when(conversations.requireExisting(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(assistant.ask(any(), any(), any())).thenReturn(
+                new AssistantService.Turn(new AgentResult("答案", List.of("search_knowledge({})"), 1), "default"));
     }
 
     private static MockMultipartFile image(String name) {
@@ -64,18 +72,18 @@ class AgentControllerTest {
             eleven.add(image("p" + i + ".jpg"));
         }
 
-        assertThatThrownBy(() -> controller.agentWithImage(eleven, null))
+        assertThatThrownBy(() -> controller.agentWithImage(eleven, null, null))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("最多");
 
         verify(vision, never()).ask(any(), anyString());
-        verify(agentService, never()).run(anyString());
+        verify(assistant, never()).ask(any(), any(), any());
     }
 
     @Test
     @DisplayName("没有图片 -> 报错")
     void rejectsEmptyFiles() {
-        assertThatThrownBy(() -> controller.agentWithImage(List.of(), null))
+        assertThatThrownBy(() -> controller.agentWithImage(List.of(), null, null))
                 .isInstanceOf(AgentException.class);
     }
 
@@ -86,11 +94,11 @@ class AgentControllerTest {
         when(vision.ask(any(), anyString())).thenReturn("一盏台灯", "一本书");
 
         AgentController.AgentResponse res = controller.agentWithImage(
-                List.of(image("a.jpg"), image("b.jpg")), "这两张图有什么共同点?");
+                List.of(image("a.jpg"), image("b.jpg")), "这两张图有什么共同点?", "c1");
 
         verify(vision, times(2)).ask(any(), anyString());
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(agentService).run(prompt.capture());
+        verify(assistant).ask(eq("c1"), prompt.capture(), any());
 
         assertThat(prompt.getValue())
                 .contains("这两张图有什么共同点?")
@@ -109,10 +117,10 @@ class AgentControllerTest {
                 .thenThrow(new RuntimeException("429 限流"))
                 .thenReturn("第二张是公式");
 
-        controller.agentWithImage(List.of(image("bad.jpg"), image("good.jpg")), null);
+        controller.agentWithImage(List.of(image("bad.jpg"), image("good.jpg")), null, null);
 
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(agentService).run(prompt.capture());
+        verify(assistant).ask(any(), prompt.capture(), any());
         assertThat(prompt.getValue())
                 .contains("【第 1 张】").contains("识别失败")
                 .contains("【第 2 张】").contains("第二张是公式");
@@ -124,11 +132,11 @@ class AgentControllerTest {
         when(fileStorage.store(anyString(), any())).thenReturn(Path.of("stored.jpg"));
         when(vision.ask(any(), anyString())).thenThrow(new RuntimeException("模型挂了"));
 
-        assertThatThrownBy(() -> controller.agentWithImage(List.of(image("bad.jpg")), null))
+        assertThatThrownBy(() -> controller.agentWithImage(List.of(image("bad.jpg")), null, null))
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("没能识别");
 
-        verify(agentService, never()).run(anyString());
+        verify(assistant, never()).ask(any(), any(), any());
     }
 
     @Test
@@ -137,8 +145,43 @@ class AgentControllerTest {
         when(fileStorage.store(anyString(), any())).thenReturn(Path.of("stored.jpg"));
         when(vision.ask(any(), anyString())).thenThrow(new RuntimeException("模型挂了"));
 
-        controller.agentWithImage(List.of(image("bad.jpg")), "这张图是什么意思?");
+        controller.agentWithImage(List.of(image("bad.jpg")), "这张图是什么意思?", null);
 
-        verify(agentService).run(anyString());
+        verify(assistant).ask(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("存进历史的是「用户原话」,拼给模型的才带图片描述")
+    void keepsUserWordsAsTheStoredQuestion() {
+        when(fileStorage.store(anyString(), any())).thenReturn(Path.of("stored.jpg"));
+        when(vision.ask(any(), anyString())).thenReturn("一盏台灯");
+        when(assistant.ask(eq("c9"), any(), any())).thenReturn(
+                new AssistantService.Turn(new AgentResult("答案", List.of(), 1), "c9"));
+
+        AgentController.AgentResponse res = controller.agentWithImage(
+                List.of(image("a.jpg")), "这是什么?", "c9");
+
+        ArgumentCaptor<String> modelQuestion = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> displayQuestion = ArgumentCaptor.forClass(String.class);
+        verify(assistant).ask(eq("c9"), modelQuestion.capture(), displayQuestion.capture());
+
+        assertThat(modelQuestion.getValue()).contains("一盏台灯").contains("这是什么?");
+        assertThat(displayQuestion.getValue()).isEqualTo("这是什么?");
+        assertThat(res.conversationId()).isEqualTo("c9");
+    }
+
+    @Test
+    @DisplayName("纯文本提问:模型看到的问题 = 存进历史的那句话")
+    void textQuestionUsesTheSameTextForBoth() {
+        controller.agent(new AgentController.AgentRequest("位移是多少?", "c2"));
+
+        verify(assistant).ask("c2", "位移是多少?", "位移是多少?");
+    }
+
+    @Test
+    @DisplayName("空问题 -> 拒绝")
+    void rejectsBlankQuestion() {
+        assertThatThrownBy(() -> controller.agent(new AgentController.AgentRequest("  ", null)))
+                .isInstanceOf(AgentException.class);
     }
 }

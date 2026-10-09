@@ -105,4 +105,91 @@ class KnowledgeExtractorTest {
 
         assertTrue(fake.lastOptions.jsonMode(), "提取调用应开启 jsonMode");
     }
+
+    // ---------- 以下为容错解析(真机灌《大学物理学》撞出来的坑) ----------
+
+    @Test
+    @DisplayName("容错:模型把多个对象并排吐出来(没有数组外壳)→ 照样捞回")
+    void salvagesConcatenatedObjects() {
+        FakeLlmClient fake = new FakeLlmClient(
+                "{\"name\":\"轨道角动量\",\"detail\":\"沿袭经典力学名词所称的轨道角动量。\"} "
+                        + "{\"name\":\"角动量大小公式\",\"detail\":\"由角量子数 l 决定。\"}");
+
+        List<KnowledgePoint> points = extractor(fake).extract("角动量那一段……");
+
+        assertEquals(2, points.size());
+        assertEquals("轨道角动量", points.get(0).name());
+        assertEquals("角动量大小公式", points.get(1).name());
+    }
+
+    @Test
+    @DisplayName("容错:外面包了壳({\"points\":[...]})→ 截最外层数组")
+    void salvagesWrappedArray() {
+        FakeLlmClient fake = new FakeLlmClient("{\"points\":[{\"name\":\"位矢\",\"detail\":\"从原点指向质点的有向线段\"}]}");
+
+        List<KnowledgePoint> points = extractor(fake).extract("位矢……");
+
+        assertEquals(1, points.size());
+        assertEquals("位矢", points.get(0).name());
+    }
+
+    @Test
+    @DisplayName("容错:代码围栏 + 引导语包裹 → 仍然能解析")
+    void salvagesFencedWithProse() {
+        FakeLlmClient fake = new FakeLlmClient(
+                "好的,以下是提取结果:\n```json\n[{\"name\":\"位移\",\"detail\":\"位置的变化量\"}]\n```\n以上。");
+
+        List<KnowledgePoint> points = extractor(fake).extract("位移……");
+
+        assertEquals(1, points.size());
+        assertEquals("位移", points.get(0).name());
+    }
+
+    @Test
+    @DisplayName("容错:detail 里带花括号也不切错")
+    void handlesBracesInsideStrings() {
+        FakeLlmClient fake = new FakeLlmClient(
+                "{\"name\":\"集合表示法\",\"detail\":\"形如 {a, b, c} 的写法\"} "
+                        + "{\"name\":\"空集\",\"detail\":\"不含任何元素的集合\"}");
+
+        List<KnowledgePoint> points = extractor(fake).extract("集合……");
+
+        assertEquals(2, points.size());
+        assertEquals("形如 {a, b, c} 的写法", points.get(0).detail());
+        assertEquals("空集", points.get(1).name());
+    }
+
+    @Test
+    @DisplayName("容错:只有一个对象 → 当成单条知识点")
+    void salvagesSingleObject() {
+        FakeLlmClient fake = new FakeLlmClient("{\"name\":\"匀加速直线运动\",\"detail\":\"加速度恒定的直线运动\"}");
+
+        List<KnowledgePoint> points = extractor(fake).extract("匀加速……");
+
+        assertEquals(1, points.size());
+    }
+
+    @Test
+    @DisplayName("容错:数组被套进字符串里({\"type\":\"json_object\",\"content\":\"[...]\"})→ 剥壳再解")
+    void unwrapsStringPayload() {
+        FakeLlmClient fake = new FakeLlmClient(
+                "{\"type\":\"json_object\",\"content\":\"[{\\\"name\\\":\\\"热力学概率\\\",\\\"detail\\\":\\\"宏观状态对应的概率。\\\"}]\"}");
+
+        List<KnowledgePoint> points = extractor(fake).extract("热力学……");
+
+        assertEquals(1, points.size());
+        assertEquals("热力学概率", points.get(0).name());
+    }
+
+    @Test
+    @DisplayName("容错:name 空白的条目当噪声丢掉")
+    void dropsBlankNames() {
+        FakeLlmClient fake = new FakeLlmClient(
+                "[{\"name\":\"\",\"detail\":\"没有名字\"},{\"name\":\"速度\",\"detail\":\"位置变化率\"}]");
+
+        List<KnowledgePoint> points = extractor(fake).extract("速度……");
+
+        assertEquals(1, points.size());
+        assertEquals("速度", points.get(0).name());
+    }
 }

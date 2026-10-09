@@ -116,6 +116,58 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         return List.copyOf(items.values());
     }
 
+    // ---------------------------------------------------------------- 删除 / 替换(按来源)
+
+    @Override
+    public List<String> sources() {
+        return items.values().stream().map(KnowledgeItem::source).distinct().toList();
+    }
+
+    @Override
+    public Map<String, Integer> countsBySource() {
+        Map<String, Integer> counts = new LinkedHashMap<>();           // 保序,列表看着顺
+        items.values().forEach(k -> counts.merge(k.source(), 1, Integer::sum));
+        return counts;
+    }
+
+    @Override
+    public int removeBySource(String source) {
+        if (source == null || source.isBlank()) return 0;              // 防呆:空参数绝不等于"清库"
+        int removed = (int) items.values().stream()
+                .filter(k -> source.equals(k.source()))
+                .count();
+        if (removed == 0) return 0;
+
+        items.values().removeIf(k -> source.equals(k.source()));
+        purgeOrphanVectors();
+        persist();
+        persistVectors();                                             // 顺手把向量 sidecar 瘦身
+        log.info("按来源删除 {} 条:{}", removed, source);
+        return removed;
+    }
+
+    @Override
+    public int replaceSource(String source, List<KnowledgeItem> newItems) {
+        if (source == null || source.isBlank()) {
+            throw new AgentException("来源为空,拒绝替换");
+        }
+        int removed = (int) items.values().stream()
+                .filter(k -> source.equals(k.source()))
+                .count();
+        items.values().removeIf(k -> source.equals(k.source()));       // ① 这本旧的全不要
+        for (KnowledgeItem item : newItems) items.put(item.id(), item); // ② 整份换成新的
+        purgeOrphanVectors();
+        persist();
+        ensureVectors();
+        log.info("重灌来源 {}:清掉旧条目 {} 条,新收录 {} 条", source, removed, newItems.size());
+        return newItems.size();
+    }
+
+    /** 清掉向量表里已经不存在对应条目的记录(删条目时顺手调用),免得 sidecar 越滚越大。 */
+    private void purgeOrphanVectors() {
+        vectors.keySet().removeIf(id -> !items.containsKey(id));
+    }
+
     // ---------------------------------------------------------------- 检索(hybrid + 阈值)
 
     @Override

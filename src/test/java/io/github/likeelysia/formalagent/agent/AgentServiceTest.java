@@ -136,6 +136,33 @@ class AgentServiceTest {
     }
 
     @Test
+    @DisplayName("带历史:历史插在系统提示之后、当前提问之前")
+    void injectsHistoryInTheRightPlace() {
+        ScriptedLlm llm = new ScriptedLlm(new AssistantTurn("好的。", null));
+        AgentService agent = new AgentService(llm, List.of(new FakeTool()), mapper);
+
+        agent.run("那它呢?", List.of(AgentMessage.user("位移是多少?"),
+                new AgentMessage("assistant", "零。", null, null)));
+
+        List<AgentMessage> sent = llm.lastMessages;
+        assertEquals("system", sent.get(0).role());
+        assertEquals("位移是多少?", sent.get(1).content());
+        assertEquals("零。", sent.get(2).content());
+        assertEquals("那它呢?", sent.get(sent.size() - 1).content());
+    }
+
+    @Test
+    @DisplayName("不带历史:消息表就是「系统提示 + 当前提问」两条")
+    void withoutHistoryOnlyTwoMessagesGoOut() {
+        ScriptedLlm llm = new ScriptedLlm(new AssistantTurn("好的。", null));
+        AgentService agent = new AgentService(llm, List.of(new FakeTool()), mapper);
+
+        agent.run("位移是多少?");
+
+        assertEquals(2, llm.lastMessages.size());
+    }
+
+    @Test
     @DisplayName("工具抛异常 → 变成观察结果,循环继续")
     void toolFailureBecomesObservation() {
         Tool boom = new Tool() {

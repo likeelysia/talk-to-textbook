@@ -13,11 +13,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import io.github.likeelysia.formalagent.doc.ReaderRegistry;
+import io.github.likeelysia.formalagent.ocr.OcrEngines;
 
 class DocPipelineTest {
 
     private final DocPipeline pipeline = new DocPipeline(
-            new ReaderRegistry(new PlainTextReader(), new PdfReader((image, prompt) -> ""),
+            new ReaderRegistry(new PlainTextReader(), new PdfReader(OcrEngines.single(image -> "")),
                     new ImageReader((image, prompt) -> "")),
             new TextSplitter(20, 5));
 
