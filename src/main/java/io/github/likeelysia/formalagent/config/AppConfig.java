@@ -52,8 +52,8 @@ public record AppConfig(
     public record Conversation(String dir) {
     }
 
-    /** 记忆:短期 = 会话内“最近几轮 + 滚动摘要”(批次 B);长期 = 待后续批次。 */
-    public record Memory(ShortTerm shortTerm) {
+    /** 记忆:短期 = 会话内“最近几轮 + 滚动摘要”;长期 = 跨轮累积的事实 / 偏好。 */
+    public record Memory(ShortTerm shortTerm, LongTerm longTerm) {
 
         /**
          * 短期记忆的窗口参数。
@@ -63,6 +63,24 @@ public record AppConfig(
          * @param summarize 超出窗口的部分要不要压成滚动摘要(不压 = 直接丢,只留最近几轮)
          */
         public record ShortTerm(int maxTurns, int maxChars, boolean summarize) {
+        }
+
+        /**
+         * 长期记忆(跨轮、跨窗口地记着“关于用户已知什么”)。
+         *
+         * @param enabled           开关;关掉 = 既不提炼也不召回
+         * @param dir               记忆落盘目录(一个记忆域一个 JSON)
+         * @param extractEveryTurns 攒够几轮提炼一次(1 轮 = 一条提问 + 它的回答)
+         * @param keepScore         模型打分低于它就丢掉(0 = 全留)
+         * @param recallTopK        每次提问最多召回几条
+         * @param dedupSimilarity   两条记忆余弦相似度超过它就当成同一件事,合并
+         * @param maxItems          一次提炼最多入库几条
+         * @param minChars          一轮对话短于这么多字就不送去提炼(寒暄 / 确认)
+         * @param maxStored         一个记忆域最多存几条(超了就淘汰"最久没被用到"的;<b>钉住的永不淘汰</b>);<=0 = 用默认值
+         */
+        public record LongTerm(boolean enabled, String dir, int extractEveryTurns, double keepScore,
+                               int recallTopK, double dedupSimilarity, int maxItems, int minChars,
+                               int maxStored) {
         }
     }
 }

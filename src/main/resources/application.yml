@@ -84,7 +84,7 @@ fa:
   conversation:
     dir: ${FA_CONVERSATION_DIR:data/conversations}
 
-  # ---- 记忆(短期 = 会话内上下文窗口 + 滚动摘要)----
+  # ---- 记忆(短期 = 会话内上下文窗口;长期 = 跨轮累积的事实 / 偏好)----
   #   模型本身不会“记得”上一句 —— 每次请求都得把“之前聊过什么”重新喂给它。
   #   全量喂会越聊越贵(而且越聊越跑题),所以只带“最近几轮原文”,更早的压成一段摘要。
   memory:
@@ -95,6 +95,24 @@ fa:
       max-chars: ${FA_MEMORY_MAX_CHARS:6000}
       # 被挤出窗口的旧对话:true = 压成滚动摘要(存进会话的 summary);false = 直接丢
       summarize: ${FA_MEMORY_SUMMARIZE:true}
+    # 长期记忆:攒够几轮就在后台提炼一次,存 data/memory/<记忆域>.json
+    long-term:
+      enabled: ${FA_MEMORY_LONG_TERM:true}
+      dir: ${FA_MEMORY_DIR:data/memory}
+      # 攒够几轮提炼一次(1 轮 = 一条提问 + 它的回答)
+      extract-every-turns: ${FA_MEMORY_EXTRACT_TURNS:6}
+      # 模型打分低于它就丢掉(0 = 全留)
+      keep-score: ${FA_MEMORY_KEEP_SCORE:0.5}
+      # 每次提问最多召回几条带进上下文
+      recall-top-k: ${FA_MEMORY_RECALL_TOP_K:5}
+      # 两条记忆余弦相似度超过它就当成同一件事,合并成一条
+      dedup-similarity: ${FA_MEMORY_DEDUP:0.9}
+      # 一次提炼最多入库几条
+      max-items: ${FA_MEMORY_MAX_ITEMS:5}
+      # 一个记忆域最多存几条:超了就淘汰“最久没被召回”的(钉住的、用户自己加的不淘汰);<=0 = 用默认值(500)
+      max-stored: ${FA_MEMORY_MAX_STORED:500}
+      # 一轮对话短于这么多字就不送去提炼(寒暄 / 确认)
+      min-chars: ${FA_MEMORY_MIN_CHARS:20}
 
   # ---- 教材切块 / 灌库断点 ----
   extract:

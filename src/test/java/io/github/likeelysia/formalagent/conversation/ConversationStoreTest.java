@@ -111,6 +111,18 @@ class ConversationStoreTest {
     }
 
     @Test
+    @DisplayName("memoryCount(长期记忆水位)也能落盘回读")
+    void memoryWatermarkRoundTrips() {
+        Conversation created = store.create("记忆水位");
+        store.update(created.id(), c -> c.appended(ChatMessage.user("q"))
+                .appended(ChatMessage.assistant("a", null)).withMemoryCount(2));
+
+        Conversation back = store.load(created.id()).orElseThrow();
+        assertThat(back.memoryCount()).isEqualTo(2);
+        assertThat(back.summarizedCount()).isZero();          // 两个水位各管一条线
+    }
+
+    @Test
     @DisplayName("老档没有 summarizedCount 字段照样读得回,水位当 0")
     void oldFileWithoutWatermarkStillReads() throws IOException {
         Files.writeString(tmp.resolve("old1.json"), """
@@ -120,6 +132,7 @@ class ConversationStoreTest {
         Conversation back = store.load("old1").orElseThrow();
 
         assertThat(back.summarizedCount()).isZero();
+        assertThat(back.memoryCount()).isZero();              // 新加的字段也兜得住
         assertThat(back.messages()).isEmpty();
     }
 

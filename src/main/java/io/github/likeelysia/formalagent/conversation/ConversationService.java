@@ -102,6 +102,19 @@ public class ConversationService {
         return store.update(resolve(id), c -> c.withSummary(summary, Math.max(covered, c.summarizedCount())));
     }
 
+    /**
+     * 记下长期记忆提炼到哪儿了(前多少条消息已经送去提炼过)。
+     *
+     * <p>和 {@link #applySummary} 一个道理:水位<b>只进不退</b> ——
+     * 推过头,那几轮对话就再也不会被提炼了(提炼不着,也补不回来)。
+     *
+     * <p>提炼在后台线程跑,所以这里直接走 store 的锁:读到的是“此刻”的会话,
+     * 不会把 Web 请求刚写进去的消息盖掉。
+     */
+    public Conversation markMemorized(String id, int covered) {
+        return store.update(resolve(id), c -> c.withMemoryCount(Math.max(covered, c.memoryCount())));
+    }
+
     /** null / 空白 → 默认会话。 */
     private String resolve(String id) {
         if (id == null || id.isBlank()) {

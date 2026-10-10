@@ -21,6 +21,9 @@ import java.util.List;
  * <p><b>summarizedCount(摘要水位)</b>:短期记忆用的。会话聊长了以后,把最老的一段压成
  * {@code summary} 一句话,再把“已经压掉了几条消息”记在这里 —— 下次拼上下文就从这条之后开始取,
  * 已经进过摘要的老消息不会重复喂给模型。
+ *
+ * <p><b>memoryCount(长期记忆水位)</b>:长期记忆用的。它记的是“前多少条消息已经送去提炼过了”,
+ * 攒够若干轮提炼一次 —— 两个水位各管一条线,别混。
  */
 public record Conversation(
         String id,
@@ -30,6 +33,7 @@ public record Conversation(
         long updatedAt,
         String summary,
         int summarizedCount,
+        int memoryCount,
         List<ChatMessage> messages) {
 
     /** 默认会话的固定 id:前端不传 id 时都落到它头上(所以第一次打开就有得聊)。 */
@@ -49,12 +53,13 @@ public record Conversation(
         scopeId = (scopeId == null || scopeId.isBlank()) ? id : scopeId;
         messages = messages == null ? List.of() : List.copyOf(messages);
         summarizedCount = Math.min(Math.max(0, summarizedCount), messages.size());
+        memoryCount = Math.min(Math.max(0, memoryCount), messages.size());
     }
 
     /** 造一个新会话:创建时间 = 更新时间 = 现在,记忆域默认独占。 */
     public static Conversation of(String id, String title) {
         long now = System.currentTimeMillis();
-        return new Conversation(id, title, id, now, now, null, 0, List.of());
+        return new Conversation(id, title, id, now, now, null, 0, 0, List.of());
     }
 
     /** 追加一条消息(返回新对象,原对象不动)。 */
@@ -62,19 +67,19 @@ public record Conversation(
         List<ChatMessage> next = new ArrayList<>(messages);
         next.add(message);
         return new Conversation(id, title, scopeId, createdAt, System.currentTimeMillis(),
-                summary, summarizedCount, next);
+                summary, summarizedCount, memoryCount, next);
     }
 
     /** 改名。 */
     public Conversation renamed(String newTitle) {
         return new Conversation(id, newTitle, scopeId, createdAt, System.currentTimeMillis(),
-                summary, summarizedCount, messages);
+                summary, summarizedCount, memoryCount, messages);
     }
 
     /** 换记忆域(共享 / 拆回独立都走它)。 */
     public Conversation withScope(String newScopeId) {
         return new Conversation(id, title, newScopeId, createdAt, System.currentTimeMillis(),
-                summary, summarizedCount, messages);
+                summary, summarizedCount, memoryCount, messages);
     }
 
     /**
@@ -85,7 +90,18 @@ public record Conversation(
      */
     public Conversation withSummary(String newSummary, int covered) {
         return new Conversation(id, title, scopeId, createdAt, System.currentTimeMillis(),
-                newSummary, covered, messages);
+                newSummary, covered, memoryCount, messages);
+    }
+
+    /**
+     * 记上长期记忆提炼到哪儿了(前多少条消息已经送去提炼过)。
+     *
+     * <p>和摘要水位一样<b>只进不退</b>:它决定“下次从哪条开始提炼”,
+     * 推过头就等于那几轮白聊了 —— 提炼不着,也补不回来。
+     */
+    public Conversation withMemoryCount(int covered) {
+        return new Conversation(id, title, scopeId, createdAt, System.currentTimeMillis(),
+                summary, summarizedCount, covered, messages);
     }
 
     /**

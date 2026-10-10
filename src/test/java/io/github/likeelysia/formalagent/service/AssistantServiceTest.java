@@ -12,11 +12,17 @@ import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.conversation.ConversationStore;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.ChatOptions;
+import io.github.likeelysia.formalagent.llm.EmbeddingClient;
 import io.github.likeelysia.formalagent.llm.LlmClient;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import io.github.likeelysia.formalagent.llm.dto.AssistantTurn;
 import io.github.likeelysia.formalagent.llm.dto.ToolDefinition;
 import io.github.likeelysia.formalagent.memory.LlmSessionSummarizer;
+import io.github.likeelysia.formalagent.memory.LongTermMemory;
+import io.github.likeelysia.formalagent.memory.MemoryEntry;
+import io.github.likeelysia.formalagent.memory.MemoryCandidate;
+import io.github.likeelysia.formalagent.memory.MemoryExtractor;
+import io.github.likeelysia.formalagent.memory.MemoryStore;
 import io.github.likeelysia.formalagent.memory.ShortTermMemory;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -62,20 +68,58 @@ class AssistantServiceTest {
         }
     }
 
+    /** 假 embedding:按关键词给确定向量,免得测试依赖真的本地服务。 */
+    static class FakeEmbedder implements EmbeddingClient {
+        @Override
+        public float[] embed(String text) {
+            return vector(text);
+        }
+
+        static float[] vector(String text) {
+            float[] v = new float[4];
+            if (text.contains("物理")) v[0] = 1;
+            if (text.contains("Java")) v[1] = 1;
+            if (text.contains("出处") || text.contains("偏好")) v[2] = 1;
+            if (v[0] == 0 && v[1] == 0 && v[2] == 0) v[3] = 1;   // 都不是:给它自己一个方向(和别人不相似)
+            return v;
+        }
+
+        @Override
+        public String modelName() {
+            return "fake";
+        }
+    }
+
     private FakeLlm llm;
     private ConversationService conversations;
+    private FakeEmbedder embedder;
+    private MemoryStore memoryStore;
+    private MemoryExtractor extractor = turns -> List.of();
 
     @BeforeEach
     void setUp() {
         llm = new FakeLlm();
+        embedder = new FakeEmbedder();
         conversations = new ConversationService(new ConversationStore(new ObjectMapper(), tmp));
         conversations.init();
     }
 
+    private LongTermMemory longTerm(boolean enabled, int everyTurns) {
+        memoryStore = new MemoryStore(new ObjectMapper(), tmp.resolve("mem"), "fake");
+        AppConfig.Memory.LongTerm config = new AppConfig.Memory.LongTerm(
+                enabled, tmp.resolve("mem").toString(), everyTurns, 0.5, 5, 0.9, 5, 20, 500);
+        return new LongTermMemory(memoryStore, extractor, embedder, conversations, config, Runnable::run);
+    }
+
     private AssistantService assistant(int maxTurns, boolean summarize) {
+        return assistant(maxTurns, summarize, longTerm(true, 6));
+    }
+
+    private AssistantService assistant(int maxTurns, boolean summarize, LongTermMemory longTerm) {
         ShortTermMemory memory = new ShortTermMemory(
                 new AppConfig.Memory.ShortTerm(maxTurns, 6000, summarize), new LlmSessionSummarizer(llm));
-        return new AssistantService(new AgentService(llm, List.of(), new ObjectMapper()), conversations, memory);
+        return new AssistantService(new AgentService(llm, List.of(), new ObjectMapper()),
+                conversations, memory, longTerm);
     }
 
     private static List<String> sent(List<AgentMessage> messages) {
@@ -193,5 +237,55 @@ class AssistantServiceTest {
         assertThat(conv.messages()).hasSize(2);
         assertThat(conv.messages().get(0).content()).isEqualTo("用户原话");
         assertThat(conv.messages().get(1).content()).isEqualTo("查到了。");
+    }
+
+    @Test
+    @DisplayName("长期记忆插在系统提示词之后、历史之前")
+    void longTermMemoriesGoRightAfterTheSystemPrompt() {
+        LongTermMemory longTerm = longTerm(true, 6);
+        String id = conversations.create("物理复习").id();
+        memoryStore.update(id, list -> List.of(
+                MemoryEntry.of(id, "用户在准备物理考试", "c0", FakeEmbedder.vector("物理"))));
+        AssistantService assistant = assistant(6, true, longTerm);
+        llm.script.add(new AssistantTurn("位移是零。", null));
+
+        assistant.ask(id, "物理里的位移是什么意思?", "物理里的位移是什么意思?");
+
+        List<String> sent = sent(llm.rounds.get(0));
+        assertThat(sent.get(0)).contains("教材讲解助手");                    // 系统提示词在最前
+        assertThat(sent.get(1)).contains("长期记忆").contains("在准备物理考试");
+        assertThat(sent.get(sent.size() - 1)).isEqualTo("物理里的位移是什么意思?");   // 当前提问在最后
+    }
+
+    @Test
+    @DisplayName("回答记完账就在后台提炼一次(攒够轮数)")
+    void extractionRunsAfterTheTurnIsRecorded() {
+        extractor = turns -> List.of(new MemoryCandidate("用户在准备物理考试", 0.5));
+        LongTermMemory longTerm = longTerm(true, 1);
+        AssistantService assistant = assistant(6, true, longTerm);
+        String id = conversations.create("会提炼").id();
+        llm.script.add(new AssistantTurn("答", null));
+
+        assistant.ask(id, "我在准备物理考试,以后回答请给出来源", "我在准备物理考试,以后回答请给出来源");
+
+        assertThat(memoryStore.list(id)).extracting(MemoryEntry::text).containsExactly("用户在准备物理考试");
+        assertThat(conversations.get(id).memoryCount()).isEqualTo(2);        // 水位跟着走
+    }
+
+    @Test
+    @DisplayName("提炼挂了也不影响这一轮问答")
+    void extractionFailureDoesNotBreakTheTurn() {
+        extractor = turns -> {
+            throw new IllegalStateException("提炼模型超时");
+        };
+        LongTermMemory longTerm = longTerm(true, 1);
+        AssistantService assistant = assistant(6, true, longTerm);
+        String id = conversations.create("提炼会挂").id();
+        llm.script.add(new AssistantTurn("照样有答案", null));
+
+        AssistantService.Turn turn = assistant.ask(id, "一个有点长度的问题", "一个有点长度的问题");
+
+        assertThat(turn.result().answer()).isEqualTo("照样有答案");
+        assertThat(memoryStore.list(id)).isEmpty();
     }
 }

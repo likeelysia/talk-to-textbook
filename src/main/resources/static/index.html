@@ -21,6 +21,7 @@
             <button id="newConv" type="button" class="mini new" title="新建一个对话(记忆独立)">＋ 新建</button>
         </div>
         <div id="convList" class="conv-list">加载中…</div>
+        <button id="openMemory" type="button" class="mini mem-btn" title="看看这个对话记住了什么">🧠 记忆</button>
         <p class="conv-note muted small">每个对话的记忆互相独立。</p>
     </aside>
 
@@ -63,6 +64,28 @@
         </div>
     </aside>
 </main>
+
+<!-- ==================== 长期记忆抽屉 ==================== -->
+<div id="memoryModal" class="modal" hidden>
+    <div class="modal-box card">
+        <div class="modal-head">
+            <h2>🧠 这个对话记住的事</h2>
+            <button id="closeMemory" type="button" class="mini">关闭</button>
+        </div>
+        <p class="mem-tip muted small">
+            助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标了 📌 的不会被自动清理(满了先淘汰最久没用到的那条)。
+        </p>
+        <div class="mem-add">
+            <input id="memText" type="text" placeholder="手动记住一件事,例如:我叫鹏哥,在准备 Java 实习面试" autocomplete="off">
+            <button id="memAdd" type="button">记住</button>
+        </div>
+        <div id="memList" class="mem-list">加载中…</div>
+        <div class="mem-foot">
+            <button id="memExport" type="button" class="mini">导出 JSON</button>
+            <button id="memForgetAll" type="button" class="mini danger">忘掉全部</button>
+        </div>
+    </div>
+</div>
 
 <script src="/app.js"></script>
 </body>

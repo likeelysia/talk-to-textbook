@@ -117,6 +117,20 @@ class ConversationServiceTest {
     }
 
     @Test
+    @DisplayName("markMemorized:长期记忆水位只能前进不能后退")
+    void markMemorizedOnlyMovesForward() {
+        ConversationMeta meta = service.create("记忆水位");
+        service.record(meta.id(), "问题一", "回答一", null);
+
+        service.markMemorized(meta.id(), 2);
+        assertThat(service.get(meta.id()).memoryCount()).isEqualTo(2);
+
+        service.markMemorized(meta.id(), 1);
+        assertThat(service.get(meta.id()).memoryCount()).isEqualTo(2);
+        assertThat(service.get(meta.id()).messages()).hasSize(2);        // 原文照样在
+    }
+
+    @Test
     @DisplayName("conversationId 为空 -> 记进默认会话(老前端不带这个字段也能用)")
     void blankIdFallsBackToDefault() {
         service.record(null, "你好", "你好呀", null);

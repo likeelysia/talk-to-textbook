@@ -304,6 +304,7 @@ async function loadThread(id) {
     } else {
         msgs.forEach(renderStoredMessage);
     }
+    loadMemoryCount();                 // 顺手把这个对话“记住了几条”刷到按钮上
 }
 
 async function newConversation() {
@@ -459,6 +460,181 @@ async function loadKnowledge() {
         box.textContent = '加载失败:' + e.message;
     }
 }
+
+/* ---------------- 长期记忆:看得见、改得动、删得掉 ---------------- */
+
+const openMemoryBtn = document.getElementById('openMemory');
+const memoryModal = document.getElementById('memoryModal');
+const closeMemoryBtn = document.getElementById('closeMemory');
+const memTextEl = document.getElementById('memText');
+const memAddBtn = document.getElementById('memAdd');
+const memListEl = document.getElementById('memList');
+const memExportBtn = document.getElementById('memExport');
+const memForgetBtn = document.getElementById('memForgetAll');
+
+/** 记忆接口都要带上“当前会话”(后端按它找记忆域)。 */
+function memQuery() {
+    return 'conversationId=' + encodeURIComponent(currentConversationId || '');
+}
+
+function formatTime(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 按钮上那个条数:加载失败也不打扰用户,静静退成不带数字的样子。 */
+async function loadMemoryCount() {
+    try {
+        const data = await apiJson('/api/memory?' + memQuery());
+        openMemoryBtn.textContent = `🧠 记忆(${data.count || 0})`;
+    } catch {
+        openMemoryBtn.textContent = '🧠 记忆';
+    }
+}
+
+function renderMemories(list) {
+    memListEl.innerHTML = '';
+    if (!list.length) {
+        memListEl.innerHTML = '<p class="muted small">这个对话还没记住什么。</p>';
+        return;
+    }
+    list.forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'mem-item';
+
+        const pin = document.createElement('button');
+        pin.type = 'button';
+        pin.className = 'mini' + (m.pinned ? ' pinned' : '');
+        pin.textContent = m.pinned ? '📌' : '📍';
+        pin.title = m.pinned ? '已钉住(不会被自动清理)—— 点一下取消' : '点一下钉住(不会被自动清理)';
+        pin.addEventListener('click', () => togglePin(m));
+
+        // 记忆正文是用户/模型产出的自由文本 —— 一律 textContent,绝不当 HTML 解析(XSS)
+        const text = document.createElement('span');
+        text.className = 'mem-text';
+        text.textContent = m.text;
+        text.title = `${m.origin === 'user' ? '你亲手记的' : '助手提炼的'} · ${formatTime(m.createdAt)}`;
+
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'mini';
+        edit.textContent = '✎';
+        edit.title = '改一下';
+        edit.addEventListener('click', () => editMemory(m));
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'mini danger';
+        del.textContent = '×';
+        del.title = '删掉这条';
+        del.addEventListener('click', () => deleteMemory(m));
+
+        const tools = document.createElement('span');
+        tools.className = 'mem-tools';
+        tools.append(edit, del);
+
+        row.append(pin, text, tools);
+        memListEl.appendChild(row);
+    });
+}
+
+async function loadMemories() {
+    memListEl.textContent = '加载中…';
+    try {
+        const data = await apiJson('/api/memory?' + memQuery());
+        renderMemories(data.memories || []);
+        openMemoryBtn.textContent = `🧠 记忆(${data.count || 0})`;
+    } catch (e) {
+        memListEl.textContent = '读不出来:' + e.message;
+    }
+}
+
+async function addMemory() {
+    const text = memTextEl.value.trim();
+    if (!text) return;
+    try {
+        await apiJson('/api/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId: currentConversationId, text })
+        });
+        memTextEl.value = '';
+        await loadMemories();
+    } catch (e) {
+        window.alert('没记上:' + e.message);
+    }
+}
+
+async function patchMemory(m, body) {
+    try {
+        await apiJson('/api/memory/' + encodeURIComponent(m.id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({ conversationId: currentConversationId }, body))
+        });
+        await loadMemories();
+    } catch (e) {
+        window.alert('没改成:' + e.message);
+    }
+}
+
+function togglePin(m) {
+    return patchMemory(m, { pinned: !m.pinned });
+}
+
+function editMemory(m) {
+    const text = window.prompt('改成:', m.text || '');
+    if (text === null) return;                    // 点了取消
+    const clean = text.trim();
+    if (!clean || clean === m.text) return;
+    return patchMemory(m, { text: clean, pinned: m.pinned });
+}
+
+async function deleteMemory(m) {
+    if (!window.confirm('删掉这条记忆?')) return;
+    try {
+        await apiJson('/api/memory/' + encodeURIComponent(m.id) + '?' + memQuery(), { method: 'DELETE' });
+        await loadMemories();
+    } catch (e) {
+        window.alert('没删掉:' + e.message);
+    }
+}
+
+function openMemory() {
+    memoryModal.hidden = false;
+    memTextEl.focus();
+    loadMemories();
+}
+
+function closeMemory() {
+    memoryModal.hidden = true;
+}
+
+openMemoryBtn.addEventListener('click', openMemory);
+closeMemoryBtn.addEventListener('click', closeMemory);
+memAddBtn.addEventListener('click', addMemory);
+memTextEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addMemory(); }
+});
+memoryModal.addEventListener('click', (e) => { if (e.target === memoryModal) closeMemory(); });   // 点遮罩关闭
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !memoryModal.hidden) closeMemory(); });
+
+memExportBtn.addEventListener('click', () => {
+    // 后端带了 Content-Disposition,浏览器会当附件直接下载,这里就用最土也最稳的跳转
+    window.location = '/api/memory/export?' + memQuery();
+});
+
+memForgetBtn.addEventListener('click', async () => {
+    if (!window.confirm('忘掉这个对话记住的全部事情?删了就真没了。')) return;
+    try {
+        await apiJson('/api/memory?' + memQuery(), { method: 'DELETE' });
+        await loadMemories();
+    } catch (e) {
+        window.alert('没清掉:' + e.message);
+    }
+});
 
 loadKnowledge();
 initConversations();

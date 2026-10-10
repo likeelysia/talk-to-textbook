@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.EmbeddingClient;
+import io.github.likeelysia.formalagent.llm.Vectors;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -184,7 +185,7 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         List<Scored> scored = new ArrayList<>();
         for (KnowledgeItem item : items.values()) {
             float[] v = vectors.get(item.id());
-            double vectorScore = (hasVector && v != null) ? cosine(queryVector, v) : 0;
+            double vectorScore = (hasVector && v != null) ? Vectors.cosine(queryVector, v) : 0;
             double keywordScore = keywordScore(item, terms);
 
             double score = hasVector
@@ -252,19 +253,6 @@ public class JsonKnowledgeStore implements KnowledgeStore {
             if (haystack.contains(t)) hits++;
         }
         return (double) hits / terms.size();
-    }
-
-    /** 余弦相似度:-1~1,越接近 1 越像。 */
-    private static double cosine(float[] a, float[] b) {
-        double dot = 0, na = 0, nb = 0;
-        int n = Math.min(a.length, b.length);
-        for (int i = 0; i < n; i++) {
-            dot += a[i] * b[i];
-            na += a[i] * a[i];
-            nb += b[i] * b[i];
-        }
-        if (na == 0 || nb == 0) return 0;
-        return dot / (Math.sqrt(na) * Math.sqrt(nb));
     }
 
     // ---------------------------------------------------------------- 落盘

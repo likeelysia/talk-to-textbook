@@ -60,14 +60,21 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **多会话(对话框)**:默认对话 + 新建 / 改名 / 删除 / 切换;**记忆默认互相隔离**,会话以 JSON 落盘(`data/conversations/`)
 - **多轮上下文(短期记忆)**:模型每次都能看到“这个会话之前聊过什么” —— 自动带**最近几轮原文**,
   超出窗口的旧对话压成**滚动摘要**(`fa.memory.short-term.*`);摘要失败有本地兜底,历史不白丢
+- **长期记忆**:跨轮、跨窗口地记着“关于用户已知什么” —— 攒够几轮(默认 6)在**后台**提炼
+  (规则预筛 + 模型打分,只留值得记的),提问时按相似度**召回 top-K** 带进上下文;
+  按**记忆域**(`scopeId`)分桶落盘(`data/memory/`),embedding 没开就退化成**字面命中优先 + 按时间取最近几条**(`fa.memory.long-term.*`)
+- **记忆治理**:**看得见、改得动、删得掉** —— 前端左栏「🧠 记忆」是一个抽屉:列出这个对话记住的事,
+  能手动加一条(直接钉住)、改文字、钉住/取消、删一条、一键忘掉全部、导出 JSON
+  (`GET /api/memory`、`POST /api/memory`、`PATCH|DELETE /api/memory/{id}`、`DELETE /api/memory`、`GET /api/memory/export`);
+  **钉住**的(用户自己加的、或明确让记住的)永不被自动淘汰;一个记忆域超过 `max-stored`(默认 500)就淘汰"最久没被召回"的那条
 - **会话存档**:JSON(`data/conversations/`,一个会话一个文件)+ 老的 Java 原生序列化(`.bin`,CLI 用)
 - **结构化输出**:调用时开启 JSON mode(`response_format=json_object`)
 - **健壮性**:超时 + **重试 + 退避**(Spring Retry / AOP);音频类长任务失败可跳过
 - **配置**:`application.yml` + `@ConfigurationProperties`(类型安全)+ **profile**
 - **调用日志**:按天滚动到 `logs/api-YYYY-MM-DD.log`(经 SLF4J/Logback)
-- **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`GET /api/health`
+- **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`/api/memory`(记忆的看 / 加 / 改 / 钉 / 删 / 导出)、`GET /api/health`
 - **Spring Boot 工程化**:可执行 fat jar(`java -jar`)、内嵌 Tomcat、内嵌日志(SLF4J/Logback)
-- **单元测试**:**225 个**,含 Boot 容器冒烟测试与配置绑定测试(不联网、秒级)
+- **单元测试**:**285 个**,含 Boot 容器冒烟测试与配置绑定测试(不联网、秒级)
 
 ---
 
@@ -118,7 +125,7 @@ start-embedding.bat          # 起在 http://127.0.0.1:8090
 ### 构建与运行
 
 ```bash
-mvn clean test               # 跑测试(170 个)
+mvn clean test               # 跑测试(285 个)
 mvn clean package            # 打包 → target/formal-agent-0.1.0-SNAPSHOT.jar
 
 # 【默认】启动 HTTP 服务(内嵌 Tomcat,端口 8080)
@@ -196,6 +203,12 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 | `GET /api/conversations/{id}` | 读某个会话的完整聊天记录 | — |
 | `PATCH /api/conversations/{id}` | 给会话改名 | `{"title":"新名字"}` |
 | `DELETE /api/conversations/{id}` | 删除会话(默认对话不许删) | — |
+| `GET /api/memory` | **这个对话记住了些什么**(新的在前) | `?conversationId=xxx`(可省 = 默认对话) |
+| `POST /api/memory` | 手动记住一件事(**直接钉住,永不淘汰**) | `{"conversationId":"default","text":"我叫鹏哥"}` |
+| `PATCH /api/memory/{id}` | 改文字 / 钉住 / 取消钉住(不传的字段 = 不改) | `{"text":"...","pinned":true}` |
+| `DELETE /api/memory/{id}` | 删一条 | `?conversationId=xxx` |
+| `DELETE /api/memory` | **忘掉这个对话的全部记忆** | `?conversationId=xxx` |
+| `GET /api/memory/export` | 导出记忆 JSON(带 `Content-Disposition`,浏览器直接下载) | `?conversationId=xxx` |
 | `POST /api/ingest` | 教材入库(管理端,需 `X-Admin-Key`)—— **上传文件**,不收“路径” | `multipart/form-data`,`file=@物理.pdf`;加 `?replace=true` 则**先删同来源旧条目再入库** |
 | `DELETE /api/knowledge/source` | 按来源删除(管理端,需 `X-Admin-Key`);`name` 可只写一部分,**唯一命中才删** | `?name=物理` |
 | `GET /api/knowledge` | 知识库概况(总数 / 来源清单 / **各来源条数** / 抽样) | `?sample=5` |
@@ -231,7 +244,7 @@ src/main/java/io/github/likeelysia/formalagent/
 ├── FormalAgentApplication.java   # Spring Boot 启动类
 ├── chat/       # ChatSession、Message —— 命令行时代的会话与消息(保留)
 ├── conversation/ # Conversation / ChatMessage / ConversationStore(JSON 落盘)/ ConversationService —— 多会话(对话框)
-├── memory/     # ShortTermMemory(窗口裁剪)+ SessionSummarizer —— 短期记忆(最近几轮 + 滚动摘要)
+├── memory/     # ShortTermMemory(窗口裁剪)/ SessionSummarizer —— 短期记忆;LongTermMemory / MemoryStore / MemoryExtractor / MemoryCandidate —— 长期记忆(提炼 + 召回 + 治理)
 ├── cli/        # ChatCli(交互式命令行,CommandLineRunner)、IngestMain、ExtractMain、FileHint
 ├── config/     # AppConfig(@ConfigurationProperties)、SpringConfig —— 配置与容器装配
 ├── doc/        # DocumentReader / PlainTextReader / PdfReader(文字层+OCR) / ImageReader / TextSplitter / DocPipeline
@@ -292,6 +305,8 @@ variables, and `.gitignore` blocks common secret files as well as generated data
 - [x] **知识库来源管理:按来源删除 / 重灌**(CLI `--list/--remove-source/--replace` + REST `DELETE /api/knowledge/source`)
 - [x] **多会话(对话框)+ 会话管理**:默认对话 + 新建/改名/删除/切换,记忆默认互相隔离(REST `/api/conversations`)
 - [x] **多轮上下文(短期记忆)**:最近 N 轮原文 + 超窗口的**滚动摘要**,模型终于“记得”上一句(`fa.memory.short-term.*`)
+- [x] **长期记忆**:后台提炼(规则预筛 + 模型打分)+ 相似度召回 top-K,按记忆域(`scopeId`)分桶(`fa.memory.long-term.*`)
+- [x] **记忆治理**:看得见 / 改得动 / 删得掉(前端「🧠 记忆」抽屉 + `/api/memory`)+ 钉住(`pin`)不淘汰 + 总量上限淘汰最久没用的 + 导出
 - [ ] 更多工具(联网搜索 —— 需配 Prompt Injection 防护)
 - [ ] 向量库(知识到 10 万条量级再上)
 

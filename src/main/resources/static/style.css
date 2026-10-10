@@ -206,3 +206,42 @@ body.contact-page {
 .sample { margin: 8px 0 0 18px; padding: 0; font-size: 13px; color: var(--muted); }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
+
+/* ---------------- 长期记忆(抽屉) ---------------- */
+.mem-btn { width: 100%; margin-top: 2px; padding: 7px 10px; font-size: 13px; }
+
+.modal {
+    position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+    padding: 20px; background: rgba(31, 35, 48, .45);
+}
+.modal[hidden] { display: none; }            /* 不加这句 display:grid 会盖掉 hidden */
+.modal-box {
+    width: 100%; max-width: 620px; max-height: 84vh; padding: 18px;
+    display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 12px 40px rgba(31, 35, 48, .18);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.modal-head h2 { margin: 0; font-size: 16px; }
+.mem-tip { margin: 0; line-height: 1.5; }
+.mem-add { display: flex; gap: 8px; }
+.mem-add input {
+    flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 10px; font-size: 14px; outline: none; background: #fbfcff;
+}
+.mem-add input:focus { border-color: var(--brand); }
+.mem-add button { padding: 10px 16px; font-size: 14px; }
+.mem-list {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+    border-top: 1px solid var(--line); padding-top: 10px;
+}
+.mem-item {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcff;
+}
+.mem-text { flex: 1; min-width: 0; font-size: 14px; word-break: break-word; }
+.mem-item .mini.pinned { background: #fff6dc; border-color: #f0d089; }
+.mem-tools { display: flex; gap: 2px; }
+.mem-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    border-top: 1px solid var(--line); padding-top: 10px;
+}
