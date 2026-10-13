@@ -5,7 +5,7 @@ package io.github.likeelysia.formalagent.ocr;
  *
  * <p>把「图 → 文」这件事抽成一个接口,好处是<b>换引擎不动调用方</b>:
  * <ul>
- *   <li>{@code kimi} —— 远程多模态视觉模型(准,尤其能读公式;但慢,且有组织级 3 RPM 限流)</li>
+ *   <li>{@code vision} —— 远程多模态视觉模型(准,尤其能读公式;但慢,且有限流)。<b>旧名 {@code kimi} 仍作别名认它</b></li>
  *   <li>{@code rapid} —— 本地 PP-OCR(快,离线,零成本;但公式/复杂版式是弱项)</li>
  * </ul>
  *
@@ -20,7 +20,7 @@ package io.github.likeelysia.formalagent.ocr;
  */
 public interface OcrEngine {
 
-    /** 引擎标识({@code kimi} / {@code rapid}),用于日志和配置选择 */
+    /** 引擎标识({@code vision} / {@code rapid}),用于日志和配置选择 */
     default String name() {
         return "custom";
     }

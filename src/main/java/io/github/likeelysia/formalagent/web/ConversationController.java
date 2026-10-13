@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   POST   /api/conversations           新建 {"title":"可选"}
  *   GET    /api/conversations/{id}      读某个会话的完整聊天记录
  *   PATCH  /api/conversations/{id}      改名 {"title":"新名字"}
+ *   PUT    /api/conversations/{id}/memory-scope   共享记忆 {"scopeId":"另一个会话"} / {"scopeId":null} 拆回独立
  *   DELETE /api/conversations/{id}      删除(默认会话会 400)
  * </pre>
  *
@@ -61,6 +63,17 @@ public class ConversationController {
         return service.rename(id, req == null ? null : req.title());
     }
 
+    /**
+     * 改记忆域:让这个会话“加入”另一个会话的记忆域(共享长期记忆),或拆回独立。
+     *
+     * <p>共享 = 指向同一份存诸,<b>不是复制</b> —— 两边看到的是同一份,删一条两边都少一条。
+     * 拆开时只改指向,已共享的那份留在原处(不会把别人的记忆搬走)。
+     */
+    @PutMapping("/conversations/{id}/memory-scope")
+    public ConversationMeta shareMemory(@PathVariable String id, @RequestBody(required = false) ScopeRequest req) {
+        return service.shareMemory(id, req == null ? null : req.scopeId());
+    }
+
     @DeleteMapping("/conversations/{id}")
     public Map<String, Object> delete(@PathVariable String id) {
         service.delete(id);
@@ -76,5 +89,11 @@ public class ConversationController {
 
     /** 改名请求体:{"title":"新名字"}。 */
     public record RenameRequest(String title) {
+    }
+
+    /**
+     * 记忆域请求体:{"scopeId":"c1234567890ab"} = 加入那个会话;{"scopeId":null} / 不传 = 拆回独立。
+     */
+    public record ScopeRequest(String scopeId) {
     }
 }

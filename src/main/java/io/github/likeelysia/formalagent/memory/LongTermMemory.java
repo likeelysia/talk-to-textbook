@@ -392,10 +392,14 @@ public class LongTermMemory {
         store.delete(scopeOf(conversationId));
     }
 
-    /** 会话 id → 记忆域(以后要共享记忆,就是把几个会话指到同一个 scopeId,这里不用动)。 */
+    /**
+     * 会话 id → 记忆域(共享就是把几个会话的 scopeId 指到同一个,这里顺着指针走到根)。
+     *
+     * <p>走 {@link ConversationService#memoryScopeOf} 而不是直接读 {@code scopeId} ——
+     * A 指 B、B 又指 C 的时候,直接读会把 A 和 B 拆到两个槽里(以为共享了,其实没有)。
+     */
     private String scopeOf(String conversationId) {
-        String id = conversations.requireExisting(conversationId);
-        return conversations.get(id).scopeId();
+        return conversations.memoryScopeOf(conversationId);
     }
 
     /**

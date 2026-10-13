@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +62,39 @@ class AgentServiceTest {
             this.lastMessages = new ArrayList<>(messages);
             this.turns++;
             return script.isEmpty() ? new AssistantTurn("(剧本结束)", null) : script.poll();
+        }
+    }
+
+    /** 带剧本的流式假模型:每一轮 = 先吐几段字 + 最后交代"这一轮到底是什么"。 */
+    static class StreamingLlm implements LlmClient {
+        /** 一轮流式回复:先逐段吐字,再给出这一轮的真实结果(可能其实是要调工具)。 */
+        record Turn(List<String> deltas, AssistantTurn outcome) {
+        }
+
+        private final Deque<Turn> script = new ArrayDeque<>();
+
+        StreamingLlm(Turn... turns) {
+            for (Turn t : turns) script.add(t);
+        }
+
+        @Override
+        public String chat(List<Message> history, ChatOptions options) {
+            return "unused";
+        }
+
+        @Override
+        public AssistantTurn chatWithTools(List<AgentMessage> messages, List<ToolDefinition> tools) {
+            return script.isEmpty() ? new AssistantTurn("(剧本结束)", null) : script.poll().outcome();
+        }
+
+        @Override
+        public AssistantTurn chatWithToolsStream(List<AgentMessage> messages, List<ToolDefinition> tools,
+                                                 Consumer<String> onDelta) {
+            Turn turn = script.isEmpty()
+                    ? new Turn(List.of(), new AssistantTurn("(剧本结束)", null))
+                    : script.poll();
+            turn.deltas().forEach(onDelta);
+            return turn.outcome();
         }
     }
 
@@ -180,5 +214,54 @@ class AgentServiceTest {
 
         assertEquals("工具挂了,我直说。", result.answer());
         assertEquals(2, result.steps());
+    }
+
+    @Test
+    @DisplayName("流式:逐段回调正文;工具轮那半句要作废 + 报一条状态")
+    void streamsDeltasAndResetsToolTurns() {
+        FakeTool tool = new FakeTool();
+        StreamingLlm llm = new StreamingLlm(
+                // 第 1 轮:模型先自言自语半句,其实是要调工具 → 这半句必须作废
+                new StreamingLlm.Turn(List.of("我查一下"),
+                        new AssistantTurn(null, List.of(call("{\"query\":\"位移\"}")))),
+                // 第 2 轮:这才是真正的答案,逐字吐出来
+                new StreamingLlm.Turn(List.of("位移", "为零。"), new AssistantTurn("位移为零。", null)));
+        AgentService agent = new AgentService(llm, List.of(tool), mapper);
+
+        List<String> deltas = new ArrayList<>();
+        List<String> resets = new ArrayList<>();
+        List<String> statuses = new ArrayList<>();
+
+        AgentResult result = agent.runStream("位移?", List.of(), new StreamSink() {
+            @Override public void onDelta(String text) { deltas.add(text); }
+            @Override public void onReset() { resets.add("reset"); }
+            @Override public void onStatus(String text) { statuses.add(text); }
+        });
+
+        assertEquals(List.of("我查一下", "位移", "为零。"), deltas, "每一段都要原样推出去");
+        assertEquals(1, resets.size(), "工具轮只会作废一次");
+        assertEquals(1, statuses.size(), "调工具时要告诉用户它在干嘛");
+        assertTrue(statuses.get(0).contains("fake_tool"));
+        assertEquals("位移为零。", result.answer());
+        assertEquals(2, result.steps());
+        assertEquals(1, tool.calls);
+    }
+
+    @Test
+    @DisplayName("流式:不需要工具时只吐正文,不作废也不报状态")
+    void streamingWithoutToolsEmitsNoReset() {
+        StreamingLlm llm = new StreamingLlm(
+                new StreamingLlm.Turn(List.of("你好", "呀"), new AssistantTurn("你好呀", null)));
+        AgentService agent = new AgentService(llm, List.of(new FakeTool()), mapper);
+
+        List<String> resets = new ArrayList<>();
+        AgentResult result = agent.runStream("你好", List.of(), new StreamSink() {
+            @Override public void onDelta(String text) { }
+            @Override public void onReset() { resets.add("reset"); }
+        });
+
+        assertTrue(resets.isEmpty());
+        assertEquals("你好呀", result.answer());
+        assertEquals(1, result.steps());
     }
 }

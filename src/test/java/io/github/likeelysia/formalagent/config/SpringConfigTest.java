@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.chat.ChatSession;
 import io.github.likeelysia.formalagent.llm.LlmClient;
+import io.github.likeelysia.formalagent.llm.VisionClient;
 import io.github.likeelysia.formalagent.service.ChatService;
 import io.github.likeelysia.formalagent.store.SessionStore;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +32,7 @@ class SpringConfigTest {
     @Autowired ChatService chatService;
     @Autowired ChatSession chatSession;
     @Autowired LlmClient llmClient;
+    @Autowired VisionClient visionClient;
     @Autowired AppConfig appConfig;
 
     @Test
@@ -41,6 +43,7 @@ class SpringConfigTest {
         assertNotNull(chatService, "ChatService bean 应存在");
         assertNotNull(chatSession, "ChatSession bean 应存在");
         assertNotNull(llmClient, "LlmClient 实现应存在");
+        assertNotNull(visionClient, "VisionClient 实现应存在");
     }
 
     @Test
@@ -50,5 +53,7 @@ class SpringConfigTest {
         assertEquals(5, appConfig.llm().maxAttempts());
         assertEquals(120, appConfig.llm().requestTimeoutSeconds());
         assertNotNull(appConfig.embedding().url(), "embedding.url 应有值");
+        assertNotNull(appConfig.vision().apiUrl(), "vision.api-url 应有值");
+        assertNotNull(appConfig.vision().model(), "vision.model 应有值");
     }
 }

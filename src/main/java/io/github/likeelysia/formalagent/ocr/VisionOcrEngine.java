@@ -13,24 +13,28 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Kimi 视觉 OCR:把页图发给多模态模型,让它「照抄」图上的字。
+ * 视觉模型 OCR:把页图发给多模态模型,让它「照抄」图上的字。
  *
- * <p>它就是从 {@code PdfReader} 里搬出来的那段逻辑,行为基本不变(提示词还是 {@code prompts/pdf-ocr.txt}、
- * 调用失败照样抛异常交给上层记漏页),只是现在归 {@link OcrEngine} 管,能被选择、能被当兜底。
+ * <p>它就是原来那段逻辑,行为不变(提示词还是 {@code prompts/pdf-ocr.txt}、
+ * 调用失败照样抛异常交给上层记漏页),只是名字从「Kimi OCR」改成「视觉 OCR」——
+ * 因为具体是哪家的模型由 {@code fa.vision.*} 配置决定,这个类不该知道。
+ * <b>引擎标识 {@code vision} 保留旧名 {@code kimi} 作为别名</b>(老配置 {@code FA_OCR_ENGINE=kimi} 照样认)。
  *
  * <p><b>读出来是空的时候返回空串,不抛异常</b> —— 封面/空白页/只剩扫描水印的篇扉页本来就该是空的。
  * 到底是「白纸」还是「有东西没读出来」,由上层拿页图判断(见 {@code PdfReader#looksBlank})。
  *
- * <p><b>页间停顿</b>也一并搬到这里 —— 因为「分钟级速率限制」是 Kimi 自己的属性,
- * 谁调用它谁付这个代价,不该让调用方去猜。
+ * <p><b>页间停顿</b>也归它管 —— 因为「分钟级速率限制」是<b>模型服务商</b>的属性,谁调用它谁付这个代价。
  * 语义是「**两次调用的开始时刻至少相隔 `page-gap-ms`**」(不是「调完再睡固定时长」):
  * 这样无论这一页读得快还是慢,节拍都不会失控 —— 躲组织级 RPM 限流靠的就是「间隔」,不是「睡眠」。
  * 默认 1500ms 只够躲「组织并发 = 1」;撞 429(组织级 3 RPM)时把它调成 ≥ 21000 即可(60s 内最多 3 次)。
  */
 @Component
-public class KimiOcrEngine implements OcrEngine {
+public class VisionOcrEngine implements OcrEngine {
 
-    private static final Logger log = LoggerFactory.getLogger(KimiOcrEngine.class);
+    private static final Logger log = LoggerFactory.getLogger(VisionOcrEngine.class);
+
+    /** 引擎标识:新名 = {@code vision}(旧的 {@code kimi} 由 {@link OcrEngines} 做别名兼容) */
+    public static final String NAME = "vision";
 
     private final VisionClient vision;
 
@@ -40,15 +44,15 @@ public class KimiOcrEngine implements OcrEngine {
     /** 上一次调用的开始时刻;0 = 还没调用过 */
     private final AtomicLong lastStart = new AtomicLong(0);
 
-    public KimiOcrEngine(VisionClient vision,
-                         @Value("${fa.ocr.kimi.page-gap-ms:1500}") long pageGapMs) {
+    public VisionOcrEngine(VisionClient vision,
+                           @Value("${fa.ocr.vision.page-gap-ms:${fa.ocr.kimi.page-gap-ms:1500}}") long pageGapMs) {
         this.vision = vision;
         this.pageGapMs = pageGapMs;
     }
 
     @Override
     public String name() {
-        return "kimi";
+        return NAME;
     }
 
     @Override
@@ -56,14 +60,14 @@ public class KimiOcrEngine implements OcrEngine {
         pace();
         Path tmp = null;
         try {
-            tmp = Files.createTempFile("ocr-kimi-", ".jpg");
+            tmp = Files.createTempFile("ocr-vision-", ".jpg");
             Files.write(tmp, image);
             String text = vision.ask(tmp, Prompts.get("pdf-ocr"));
             // 空结果 = 这页没字(白纸/水印页) —— 正常返回空串,交给上层看着页图定夺;
             // 真正读失败会以异常形式从 vision.ask 抛出来。
             return text == null ? "" : text;
         } catch (IOException e) {
-            throw new AgentException("Kimi OCR 写临时图失败:" + e.getMessage(), e);
+            throw new AgentException("视觉 OCR 写临时图失败:" + e.getMessage(), e);
         } finally {
             deleteQuietly(tmp);
         }

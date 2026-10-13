@@ -17,6 +17,8 @@
 
 * { box-sizing: border-box; }
 
+html, body { height: 100%; }
+
 body {
     margin: 0;
     background: var(--bg);
@@ -24,7 +26,18 @@ body {
     font: 15px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
-header { padding: 28px 24px 8px; max-width: 1100px; margin: 0 auto; }
+/* ---------------- 页面外壳:整页不滚,滚动只发生在各自的框里 ----------------
+   以前 body 能整页滚 + .messages 里再滚一层 = 两个滚动条打架,底下还空一大块。
+   现在:body 撑满视口且 overflow:hidden,header 固定高,main 吃掉剩下的高度 ——
+   滚轮落在聊天框就滚聊天记录、落在左栏就滚对话列表,页面本身永远不动。
+   窄屏(<=860px)三栏堆成一列、装不下 100vh —— 那里在文件末尾的 @media 里改回整页滚。*/
+body:not(.contact-page) {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+header { padding: 28px 24px 8px; max-width: 1280px; margin: 0 auto; flex: 0 0 auto; }
 header h1 { margin: 0; font-size: 26px; }
 .sub { margin: 4px 0 0; color: var(--muted); }
 
@@ -35,11 +48,15 @@ main {
     display: grid;
     grid-template-columns: 230px minmax(0, 1fr) 300px;
     gap: 16px;
-    align-items: start;
+    align-items: stretch;          /* 三栏都撑满 main 的高度(以前是 start,右栏矮就空一大块) */
+    flex: 1 1 auto;
+    min-height: 0;
 }
 /* 屏幕变窄:会话栏缩成一条,知识库挪到下面一行 */
 @media (max-width: 1150px) {
-    main { grid-template-columns: 210px minmax(0, 1fr); }
+    /* 两行:上面给聊天(吃掉剩下的高度),下面那行封顶 40% —— 知识库长了自己内部滚,
+       不会把聊天挤成一条,也不会溢出去被 body 的 overflow:hidden 剪掉 */
+    main { grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 40%); }
     aside.side { grid-column: 1 / -1; flex-direction: row; }
     aside.side > .card { flex: 1; }
 }
@@ -57,12 +74,12 @@ main {
 }
 
 /* ---------------- 对话 ---------------- */
-.chat { display: flex; flex-direction: column; min-height: 60vh; }
+.chat { display: flex; flex-direction: column; min-height: 0; }
 
 .messages {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    max-height: 62vh;
     padding: 4px 4px 12px;
     display: flex;
     flex-direction: column;
@@ -124,6 +141,56 @@ main {
 }
 .composer input[type=text]:focus { border-color: var(--brand); }
 
+/* 流式生成中的"停止":不能跟主按钮一样抢眼,但得一眼能看见 */
+button.ghost {
+    background: #fff; color: var(--error); border: 1px solid var(--line);
+    padding: 11px 16px;
+}
+button.ghost:hover { background: #fdecea; border-color: var(--error); }
+
+/* 流式气泡:正在生成的正文 + 下面一行进度提示 */
+.bubble .answer { white-space: pre-wrap; word-break: break-word; }
+/* 生成结束后会整体重画成 Markdown + KaTeX 的 HTML —— 交给块级元素自己排版,
+   不能再 pre-wrap(否则 <p> 之间的换行会再叠一层空行) */
+.bubble .answer.rich { white-space: normal; }
+
+/* 渲染过的正文里那些 Markdown 元素(浏览器原生标签,样式默认很素,补一下) */
+.bubble .answer.rich > *:first-child { margin-top: 0; }
+.bubble .answer.rich > *:last-child { margin-bottom: 0; }
+.bubble .answer.rich p { margin: 0 0 .55em; }
+.bubble .answer.rich ul, .bubble .answer.rich ol { margin: .4em 0; padding-left: 1.5em; }
+.bubble .answer.rich li { margin: .18em 0; }
+.bubble .answer.rich h1, .bubble .answer.rich h2, .bubble .answer.rich h3,
+.bubble .answer.rich h4, .bubble .answer.rich h5, .bubble .answer.rich h6 {
+    margin: .7em 0 .35em; font-size: 1.02em; line-height: 1.4;
+}
+.bubble .answer.rich code {
+    background: rgba(0, 0, 0, .06); padding: .1em .35em; border-radius: 4px; font-size: .92em;
+}
+.bubble .answer.rich pre {
+    background: rgba(0, 0, 0, .06); padding: .6em .8em; border-radius: 6px; overflow-x: auto;
+}
+.bubble .answer.rich pre code { background: none; padding: 0; }
+.bubble .answer.rich blockquote {
+    margin: .4em 0; padding: .1em 0 .1em .8em;
+    border-left: 3px solid var(--line); color: #555;
+}
+.bubble .answer.rich table { border-collapse: collapse; margin: .45em 0; }
+.bubble .answer.rich th, .bubble .answer.rich td {
+    border: 1px solid var(--line); padding: .28em .55em; text-align: left;
+}
+.bubble .answer.rich hr { border: 0; border-top: 1px solid var(--line); margin: .7em 0; }
+/* 行内公式别把行距顶开 */
+.bubble .answer.rich .katex { font-size: 1.05em; }
+/* 长公式允许横向滚 —— 宁可滚,也不能把气泡撑爆 */
+.bubble .answer.rich .katex-display { overflow-x: auto; overflow-y: hidden; padding: .25em 0; }
+.bubble .stream-status { margin-top: 6px; min-height: 18px; }
+.bubble .stream-status::after {
+    content: '▍'; margin-left: 2px; animation: blink 1s steps(2, start) infinite;
+}
+.bubble .stream-status.done::after { content: ''; animation: none; }
+@keyframes blink { to { visibility: hidden; } }
+
 button {
     padding: 11px 20px; border: 0; border-radius: 10px; background: var(--brand); color: #fff;
     font-size: 15px; cursor: pointer; transition: background .15s;
@@ -170,10 +237,10 @@ body.contact-page {
 .contact-box .back:hover { text-decoration: underline; }
 
 /* ---------------- 会话栏(对话框列表) ---------------- */
-.convs { display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; }
+.convs { display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; min-height: 0; overflow: hidden; }
 .convs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .convs-head h2 { margin: 0; font-size: 15px; }
-.conv-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 58vh; }
+.conv-list { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .conv-item {
     display: flex; align-items: center; gap: 6px;
     border-radius: 9px; padding: 6px 8px; border: 1px solid transparent;
@@ -199,7 +266,7 @@ body.contact-page {
 .conv-note { margin: 2px 0 0; line-height: 1.5; }
 
 /* ---------------- 侧栏 ---------------- */
-.side { display: flex; flex-direction: column; gap: 16px; }
+.side { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; }
 .side h2 { margin: 0 0 10px; font-size: 16px; }
 .stat { font-size: 15px; margin-bottom: 6px; }
 .stat b { font-size: 22px; color: var(--brand); }
@@ -223,6 +290,16 @@ body.contact-page {
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .modal-head h2 { margin: 0; font-size: 16px; }
 .mem-tip { margin: 0; line-height: 1.5; }
+/* 记忆域(共享/独立)—— 一行下拉 + 一句解释 */
+.mem-scope { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.mem-scope select {
+    flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line);
+    border-radius: 9px; font-size: 13px; background: #fbfcff; color: var(--text); outline: none;
+}
+.mem-scope select:focus { border-color: var(--brand); }
+.mem-scope-hint { margin: 0; line-height: 1.5; }
+/* 侧栏里“这个对话的长期记忆正和别人共用”的链子标记 */
+.conv-share { font-size: 12px; opacity: .75; }
 .mem-add { display: flex; gap: 8px; }
 .mem-add input {
     flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--line);
@@ -244,4 +321,33 @@ body.contact-page {
 .mem-foot {
     display: flex; justify-content: flex-end; gap: 8px;
     border-top: 1px solid var(--line); padding-top: 10px;
+}
+
+/* ---------------- 通用对话框(重命名 / 删除确认) ----------------
+   和记忆抽屉同一个模子:.modal 灰蒙层 + .card 白底圆角盒;主按钮走主题蓝(*/
+.ui-box { max-width: 420px; }
+.ui-text { margin: 0; line-height: 1.5; }
+.ui-box input[type=text] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    font-size: 14px; outline: none; background: #fbfcff; color: var(--text);
+}
+.ui-box input[type=text]:focus { border-color: var(--brand); }
+.ui-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    border-top: 1px solid var(--line); padding-top: 10px;
+}
+.ui-foot button { padding: 9px 18px; font-size: 14px; }
+.ui-foot .mini { padding: 9px 16px; font-size: 14px; }
+/* 破坏性操作(删对话):同一号位,但用红 —— 一眼能分清 */
+button.danger { background: var(--error); }
+button.danger:hover { background: #b93b36; }
+
+/* ---------------- 窄屏:改回“整页滚动” ----------------
+   三栏堆成一列,100vh 装不下 —— 这里把文件开头的“应用外壳”撤掉。
+   放文件末尾是故意的:同为 .messages/.chat 的选择器,后面的才能盖住前面的。*/
+@media (max-width: 860px) {
+    html, body { height: auto; }
+    body:not(.contact-page) { overflow: visible; display: block; }
+    .chat { min-height: 60vh; }
+    .messages { max-height: 62vh; }
 }

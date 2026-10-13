@@ -362,4 +362,78 @@ class LongTermMemoryTest {
 
         assertThat(store.list("scope1").get(0).lastAccessAt()).isGreaterThan(1000L);
     }
+
+    // ==================== 共享记忆域(几个会话指到同一份) ====================
+
+    @Test
+    @DisplayName("共享:甲记的乙看得到,乙记的甲也看得到 —— 同一份,不是复制")
+    void sharedScopeIsOneCopySeenFromBothSides() {
+        LongTermMemory memory = memory(true, 2);
+        String a = conversationWithTurns(2);
+        String b = conversations.create("乙").id();
+        conversations.shareMemory(b, a);                 // 乙加入甲的记忆域
+
+        memory.remember(a, "甲记的关于物理的事");
+        assertThat(memory.list(b)).extracting(MemoryEntry::text).containsExactly("甲记的关于物理的事");
+
+        memory.remember(b, "乙记的关于Java的事");
+        assertThat(memory.list(a)).extracting(MemoryEntry::text)
+                .containsExactlyInAnyOrder("甲记的关于物理的事", "乙记的关于Java的事");
+    }
+
+    @Test
+    @DisplayName("共享:删一条两边都少一条(不存在“同步漏了”的中间态)")
+    void sharedScopeDeleteIsVisibleFromBothSides() {
+        LongTermMemory memory = memory(true, 2);
+        String a = conversationWithTurns(1);
+        String b = conversations.create("乙").id();
+        conversations.shareMemory(b, a);
+
+        MemoryEntry added = memory.remember(a, "甲记的关于物理的事");
+        assertThat(memory.forget(b, added.id())).isTrue();
+        assertThat(memory.list(a)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("拆开之后各用各的:共享期间那份留在原处,不会跟着搬走")
+    void unshareLeavesTheSharedCopyBehind() {
+        LongTermMemory memory = memory(true, 2);
+        String a = conversationWithTurns(1);
+        String b = conversations.create("乙").id();
+        conversations.shareMemory(b, a);
+        memory.remember(a, "甲记的关于物理的事");
+
+        conversations.shareMemory(b, null);              // 乙拆回独立
+
+        assertThat(memory.list(b)).isEmpty();                              // 乙是干净的一份
+        assertThat(memory.list(a)).extracting(MemoryEntry::text).containsExactly("甲记的关于物理的事");
+    }
+
+    @Test
+    @DisplayName("共享:后台提炼写进的是共享的那一份")
+    void extractionWritesIntoTheSharedScope() {
+        LongTermMemory memory = memory(true, 2);
+        String a = conversationWithTurns(2);
+        String b = conversations.create("乙").id();
+        conversations.shareMemory(b, a);
+        extractor.result = List.of("用户在学物理");
+
+        memory.maybeExtract(conversations.get(a));
+
+        assertThat(memory.list(b)).extracting(MemoryEntry::text).containsExactly("用户在学物理");
+    }
+
+    @Test
+    @DisplayName("共享:条目仍记着“当初是哪个会话聊出来的”(便于追溯与导出)")
+    void sharedEntryKeepsItsOriginConversation() {
+        LongTermMemory memory = memory(true, 2);
+        String a = conversationWithTurns(1);
+        String b = conversations.create("乙").id();
+        conversations.shareMemory(b, a);
+
+        MemoryEntry viaB = memory.remember(b, "乙记的关于Java的事");
+
+        assertThat(viaB.scopeId()).isEqualTo(a);          // 存进的是共享槽
+        assertThat(viaB.conversationId()).isEqualTo(b);   // 但出身记的是乙
+    }
 }

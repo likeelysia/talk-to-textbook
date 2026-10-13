@@ -36,11 +36,27 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 ## 功能特性 / Features
 
 - **文档入库(三种来源)**:`.txt` / `.md` 文本、原生 PDF(文字层)、**扫描版 PDF / 图片(OCR)**;产出带页码出处的知识点
-  - OCR 引擎可换:本地 **RapidOCR**(PP-OCRv4,纯 Java/CPU/离线,一页几秒)或 **Kimi 视觉**(能读公式,慢且有限流);
-    本地读糊的页可**自动回退** Kimi 重读(见下方「OCR 引擎」)
+  - OCR 引擎可换:本地 **RapidOCR**(PP-OCRv4,纯 Java/CPU/离线,一页几秒)或**视觉模型**(能读公式,慢且有限流);
+    本地读糊的页可**自动回退**视觉模型重读(见下方「OCR 引擎」)
+  - **视觉模型不写死厂商**:走 OpenAI 兼容协议,端点 / 模型 / 密钥变量 / 厂商专属字段全在配置里(`fa.vision.*`),
+    换模型只改 yml(或用现成的 `qwen` / `ollama` profile),**代码一行不动** ——
+    阿里百炼 / 智谱 GLM-4V / 火山方舟豆包 / 硅基流动 / 本地 Ollama 都能接
 - **语义检索(真 RAG 的第一步)**:知识点 → **embedding 向量**,检索按**余弦相似度**取 top-K;
   embedding 服务不可用时**自动降级**为关键词匹配(不会因此搜不了)
 - **带出处的问答**:图片 → 识图 → 检索 → 「只依据知识点」生成回答 + 【出处】
+- **公式与 Markdown 渲染**:模型是按 Markdown + LaTeX 输出的,前端本地集成了 **KaTeX + marked**(带字体,离线可用)
+  —— `$$A=\sqrt{A_1^2+A_2^2+2A_1A_2\cos(\varphi_1-\varphi_2)}$$` 这种公式、`**粗体**`、列表、表格、代码块都是真排版,不再是一屏符号;
+  流水线是“**先抠公式 → 转义 → Markdown → 再塞回公式**”(顺序不能换:公式里的 `\omega_2` 下划线会被 Markdown 当成斜体);
+  价格 `$5`、代码块里的 `$$` 不会被误当公式;
+  **`\sqrt` 认不了、渲染炸了、库没加载上** → 一律退化成纯文本显示原文(绝不吐一片空白或红字,更不会把回答弄丢)
+  - **流式期间也会边生成边排版**:每 ~150ms 重画一次,但**只重画“已经闭合”的内容** ——
+    半截的代码块 / 半截的块级公式先不碰(否则整段排版会被 Markdown 弄乱),字照常先按纯文本长出来;
+    中途点「停止」或连接断了,也会把已有的半截内容**排版好再停**,而不是留下一屏 `**` 和 `$$`
+  - ⚠ 静态资源已设 `Cache-Control: no-cache`(每次用 Last-Modified 校验一下)→ 改了 JS/CSS **普通刷新就生效**,不用记着按 Ctrl+F5
+- **流式输出(SSE)**:`POST /api/agent/stream` —— 答案**边生成边显示**,还能中途「停止」;
+  事件 `meta / status / reset / delta / done / error` + 每 15 秒一条 `: ping` 心跳;
+  模型在“决定调工具”那一轮里的自言自语会被 `reset` 作废;
+  **只在“还没吐字”时才重试**(否则用户会看到两遍半截回答);老接口 `POST /api/agent` 一字未改,新旧并存
 - **Agent 化(工具调用 / ReAct)**:把"检索"交给模型当**工具**,由它自己决定**查不查、查几次、查什么**;
   响应里带 `trace`(它到底调了哪些工具) —— 从"固定流水线"变成"会自己拿主意的 Agent"
 - **工具集**:`search_knowledge` / `knowledge_overview` / `get_knowledge_page` / **`calculator`**(自写安全表达式求值器)/ **`unit_convert`**
@@ -56,8 +72,14 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
   OCR 单页失败(限流/图糊)会**记下页号**,下次跑先补灌这几页 —— 不会静默丢页
 - **Prompt 模板外置**:文案在 `resources/prompts/*.txt`
 - **网页前端**:内置单页问答界面(`http://localhost:8080/`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库;
+  界面是**固定视口高度的“应用外壳”**:页面本身不滚,滚轮落在哪儿就滚哪儿(聊天记录 / 对话列表 / 知识库),
+  不会“一滚滚走整页”、也不留大片空白(只有窄屏 `<=860px` 堆成一列装不下时,才改回整页滚);
+  重命名 / 删除对话走页面内的白底对话框(不是浏览器原生 `prompt`/`confirm`);
   教材里没有的内容 → 「点击这里联系开发者」跳转 `/contact.html` 扫码加微信(**入库能力不在用户端暴露**)
 - **多会话(对话框)**:默认对话 + 新建 / 改名 / 删除 / 切换;**记忆默认互相隔离**,会话以 JSON 落盘(`data/conversations/`)
+- **共享记忆域**:两个对话想让助手“记住的是同一个人”,就把它们的**记忆域指到同一个**(记忆抽屉里的「🔗 记忆域」下拉选择要共用的对话)
+  —— 是**同一份存档**,不是复制同步:一边加一条、删一条,另一边立刻也看得到,不存在“同步漏了”的中间态;
+  拆开时只改指向,共享期间那份留在原处(不会把别人的记忆搬走);链式指向会**自动走到根**,不会“以为共享了、其实各读写各的”
 - **多轮上下文(短期记忆)**:模型每次都能看到“这个会话之前聊过什么” —— 自动带**最近几轮原文**,
   超出窗口的旧对话压成**滚动摘要**(`fa.memory.short-term.*`);摘要失败有本地兜底,历史不白丢
 - **长期记忆**:跨轮、跨窗口地记着“关于用户已知什么” —— 攒够几轮(默认 6)在**后台**提炼
@@ -70,6 +92,11 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **会话存档**:JSON(`data/conversations/`,一个会话一个文件)+ 老的 Java 原生序列化(`.bin`,CLI 用)
 - **结构化输出**:调用时开启 JSON mode(`response_format=json_object`)
 - **健壮性**:超时 + **重试 + 退避**(Spring Retry / AOP);音频类长任务失败可跳过
+- **可观测**:`GET /api/health` 除了“活着没 / 知识库多少条”,还给一个 **`degraded` 标志** ——
+  embedding 挂掉时检索会**静默**退化成纯关键词(只表现为“换个说法就搜不到”),
+  不报出来的话没人会发现变差(探测走轻量 `GET /health`,不占 embedding 算力)
+- **可评测**:`RetrievalEvalTest` + `retrieval_eval.json` 是检索的“尺子” ——
+  四个指标 recall@5 / MRR / 页命中@5 / 拒答率,`mvnw -o test -Dtest=RetrievalEvalTest` 一跑就知道检索有没有变差
 - **配置**:`application.yml` + `@ConfigurationProperties`(类型安全)+ **profile**
 - **调用日志**:按天滚动到 `logs/api-YYYY-MM-DD.log`(经 SLF4J/Logback)
 - **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`/api/memory`(记忆的看 / 加 / 改 / 钉 / 删 / 导出)、`GET /api/health`
@@ -92,7 +119,7 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 | RapidOCR(onnxruntime) | 0.0.7 | **本地 OCR**(PP-OCRv4,CPU/离线,自带 native 库与模型) |
 | JUnit | (Boot BOM 管) | 单元测试 |
 | **DeepSeek** | `deepseek-chat` | 文本对话 / 知识点提炼 |
-| **Kimi 视觉** | `kimi-k2.6` | 扫描件 OCR(可当本地 OCR 的兑底)/ 图片理解(请求里关闭"思考模式") |
+| **视觉模型**(OpenAI 兼容) | `kimi-k2.6`(可换) | 扫描件 OCR(可当本地 OCR 的兜底)/ 图片理解;端点 / 模型 / 厂商字段全由 `fa.vision.*` 配置决定 |
 | **本地 embedding** | `bge-small-zh-v1.5` | 经 llama.cpp `llama-server` 提供 OpenAI 兼容接口 |
 
 ---
@@ -106,6 +133,8 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - 环境变量:
   - **`DEEPSEEK_API_KEY`** —— 文本对话 / 提炼([platform.deepseek.com](https://platform.deepseek.com))
   - **`MOONSHOT_API_KEY`** —— 视觉 OCR / 图片问答([platform.moonshot.cn](https://platform.moonshot.cn))
+    (变量名也能配:换厂商就把 `fa.vision.api-key-env` 指到对应变量,如 `DASHSCOPE_API_KEY`;
+    也可用 `fa.vision.api-key` 直接写值)
 
 ```powershell
 # Windows PowerShell(设置后需重开终端 / IDEA 才生效)
@@ -171,12 +200,17 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 > 一直补不上的页也不阻塞,只在 `--progress` 里列出来。所以 OCR 打嗝不用整本重来。
 >
 > 🔤 **OCR 引擎**(`fa.ocr.engine`,可用环境变量 `FA_OCR_ENGINE` 覆盖):
-> - `kimi`(默认)—— 远程视觉模型,慢(约 10~17 秒/页)但**能把公式读成 LaTeX**;受 Moonshot 组织级 3 RPM 限制,
->   撞 429 就把 `fa.ocr.kimi.page-gap-ms`(环境变量 `FA_OCR_PAGE_GAP_MS`)调大 ——
+> - `vision`(默认;**旧名 `kimi` 仍作别名认它**)—— 远程视觉模型,慢(约 10~17 秒/页)但**能把公式读成 LaTeX**;
+>   受服务商分钟级限流时,把 `fa.ocr.vision.page-gap-ms`(环境变量 `FA_OCR_PAGE_GAP_MS`,旧键名 `fa.ocr.kimi.page-gap-ms` 也认)调大 ——
 >   它的语义是「两次调用的开始时刻至少隔这么久」,想稳在 3 次/分钟以内就设 `21000`
 > - `rapid` —— 本地 PP-OCRv4,**约 3 秒/页、离线、零成本**;中文正文质量跟视觉模型相当,
->   但**公式/化学式会读乱**(公式密集的理科书建议仍用 kimi,或配合回退使用)
-> - 两者可组合:`fa.ocr.fallback-to-kimi`(默认 `true`)在 `rapid` 读得可疑时自动换 kimi 重读那一页
+>   但**公式/化学式会读乱**(公式密集的理科书建议仍用视觉模型,或配合回退使用)
+> - 两者可组合:`fa.ocr.fallback-to-vision`(默认 `true`;旧键名 `fa.ocr.fallback-to-kimi` 也认)
+>   在 `rapid` 读得可疑时自动换**配置的兜底引擎**(`fa.ocr.fallback-engine`,默认 `vision`)重读那一页 ——
+>   兜底不再“硬认某个名字”,换厂商不会静默失去兜底
+> - **换视觉厂商不改代码**:端点 / 模型 / 密钥变量 / 厂商专属字段都在 `fa.vision.*`
+>   (`api-url` / `model` / `provider` / `api-key-env` / `extra-body-json`);也可以直接用 profile:
+>   `--spring.profiles.active=qwen`(阿里百炼)或 `ollama`(本地,离线免费)
 > - 阈值:`fa.ocr.quality.min-chars`(默认 30)、`fa.ocr.quality.min-chinese-ratio`(默认 0.2)
 > - **去噪**:`fa.ocr.watermark-lines`(默认 `夸克扫描王,极速扫描,就是高效`)—— OCR 结果里有行含这些关键字就整行丢掉,
 >   免得扫描 App 的水印变成知识点;留空 = 不过滤
@@ -198,10 +232,12 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 |---|---|---|
 | `POST /api/agent` | **Agent 问答**(模型自己决定调哪些工具) | `{"question":"位移是多少?","conversationId":"default"}` → 返回 `answer` + `steps` + `trace` + `conversationId`(`conversationId` 可省) |
 | `POST /api/agent`(multipart) | **多图问答**:最多 10 张,逐张识别 → Agent 回答 | `files=@图1.png` `files=@图2.png`(+ 可选 `question` / `conversationId`) |
+| `POST /api/agent/stream` | **流式问答(SSE)**:边生成边推送,可中途断开 | 请求体同 `POST /api/agent`;返回 `text/event-stream`,事件 `meta/status/reset/delta/done/error` |
 | `GET /api/conversations` | **会话(对话框)列表** + 默认会话 id | — |
 | `POST /api/conversations` | 新建会话 | `{"title":"物理复习"}`(可省) |
 | `GET /api/conversations/{id}` | 读某个会话的完整聊天记录 | — |
 | `PATCH /api/conversations/{id}` | 给会话改名 | `{"title":"新名字"}` |
+| `PUT /api/conversations/{id}/memory-scope` | **共享记忆域**:指向另一个会话(共用同一份长期记忆) / `null` 拆回独立 | `{"scopeId":"c1234567890ab"}` 或 `{"scopeId":null}` |
 | `DELETE /api/conversations/{id}` | 删除会话(默认对话不许删) | — |
 | `GET /api/memory` | **这个对话记住了些什么**(新的在前) | `?conversationId=xxx`(可省 = 默认对话) |
 | `POST /api/memory` | 手动记住一件事(**直接钉住,永不淘汰**) | `{"conversationId":"default","text":"我叫鹏哥"}` |
@@ -212,7 +248,7 @@ java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 | `POST /api/ingest` | 教材入库(管理端,需 `X-Admin-Key`)—— **上传文件**,不收“路径” | `multipart/form-data`,`file=@物理.pdf`;加 `?replace=true` 则**先删同来源旧条目再入库** |
 | `DELETE /api/knowledge/source` | 按来源删除(管理端,需 `X-Admin-Key`);`name` 可只写一部分,**唯一命中才删** | `?name=物理` |
 | `GET /api/knowledge` | 知识库概况(总数 / 来源清单 / **各来源条数** / 抽样) | `?sample=5` |
-| `GET /api/health` | 健康检查 | — |
+| `GET /api/health` | 健康检查:**含 embedding 健康度**(`degraded` + `embedding.{status,model}`) | — |
 
 ```powershell
 # 问一句(Agent 自己决定要不要查、查几次)
@@ -251,12 +287,18 @@ src/main/java/io/github/likeelysia/formalagent/
 ├── extract/    # KnowledgeExtractor / ExtractService / IngestService / KnowledgeReport —— 提取与入库
 ├── llm/        # LlmClient、VisionClient、EmbeddingClient(+ 各自实现与 dto/)
 ├── knowledge/  # KnowledgeItem / KnowledgeStore / JsonKnowledgeStore —— 知识库与向量检索
-├── ocr/        # OcrEngine 接口 + KimiOcrEngine(远程视觉) / RapidOcrEngine(本地 PP-OCR) + OcrEngines(选引擎/回退)
+├── ocr/        # OcrEngine 接口 + VisionOcrEngine(远程视觉) / RapidOcrEngine(本地 PP-OCR) + OcrEngines(选引擎/回退)
 ├── log/        # ApiLogger —— 模型调用审计日志
 ├── agent/      # Agent 主循环(ReAct)+ 工具(Tool 接口 / search_knowledge / knowledge_overview / get_knowledge_page)
-├── service/    # ChatService(对话)、QaService(图片问答)、FileStorage(上传落盘)
-├── web/        # Controller(REST 接口)+ 统一异常处理
+├── service/    # AssistantService(一问一答的全流程)、ChatService(对话)、QaService(图片问答)、FileStorage(上传落盘)
+├── web/        # Controller(REST + SSE 流式)+ SseStreamer + 统一异常处理
 └── store/      # SessionStore —— 存档 / 读档 / 导出
+
+src/main/resources/static/
+├── index.html / style.css / app.js   # 单页问答界面(原生 JS,无框架)
+└── vendor/     # 本地第三方库(离线可用,不走 CDN)
+    ├── katex/  # 公式排版(katex.min.js + css + fonts/*.woff2)
+    └── marked.min.js                 # Markdown 解析
 ```
 
 配置在 `src/main/resources/application.yml`(前缀 `fa.*`);

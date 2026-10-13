@@ -6,6 +6,7 @@ import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import io.github.likeelysia.formalagent.llm.dto.AssistantTurn;
 import io.github.likeelysia.formalagent.llm.dto.ToolDefinition;
 import java.util.List;
+import java.util.function.Consumer;
 
 /** 大模型客户端:给我对话历史,还我模型回复。 */
 public interface LlmClient {
@@ -26,5 +27,24 @@ public interface LlmClient {
      */
     default AssistantTurn chatWithTools(List<AgentMessage> messages, List<ToolDefinition> tools) {
         throw new AgentException("当前 LlmClient 实现不支持工具调用");
+    }
+
+    /**
+     * 流式版:{@code onDelta} 每收到一小段正文就回调一次,返回值仍是"这一轮的完整回复"
+     * (正文 + 工具调用),所以 Agent 主循环的判断逻辑不用分两套。
+     *
+     * <p>默认实现 = <b>优雅降级</b>:先用非流式拿到整段,再一次性回调给调用方。
+     * 好处是"不支持流式的实现"也能被 {@code runStream} 正确驱动,只是没有逐字效果。
+     *
+     * <p><b>重试纪律</b>(实现方必须遵守):只允许在"还一个字都没吐出去"时重试。
+     * 已经回调过 {@code onDelta} 再重试,用户会看到两遍半截回答。
+     */
+    default AssistantTurn chatWithToolsStream(List<AgentMessage> messages, List<ToolDefinition> tools,
+                                              Consumer<String> onDelta) {
+        AssistantTurn turn = chatWithTools(messages, tools);
+        if (turn.content() != null && !turn.content().isEmpty()) {
+            onDelta.accept(turn.content());
+        }
+        return turn;
     }
 }

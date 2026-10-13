@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Formal Agent · 教材问答</title>
     <link rel="stylesheet" href="/style.css">
+    <!-- 公式(KaTeX)+ 样式,和字体一起放在本地,断网也能用 -->
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css">
 </head>
 <body>
 
@@ -49,6 +51,7 @@
                 🖼️<input id="images" type="file" accept="image/*" multiple hidden>
             </label>
             <button id="send" type="submit">提问</button>
+            <button id="stop" type="button" class="ghost" hidden title="停止生成">停止</button>
         </form>
     </section>
 
@@ -75,6 +78,11 @@
         <p class="mem-tip muted small">
             助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标了 📌 的不会被自动清理(满了先淘汰最久没用到的那条)。
         </p>
+        <div class="mem-scope">
+            <label for="memScope">🔗 记忆域:</label>
+            <select id="memScope"></select>
+        </div>
+        <p id="memScopeHint" class="muted small mem-scope-hint"></p>
         <div class="mem-add">
             <input id="memText" type="text" placeholder="手动记住一件事,例如:我叫鹏哥,在准备 Java 实习面试" autocomplete="off">
             <button id="memAdd" type="button">记住</button>
@@ -87,6 +95,24 @@
     </div>
 </div>
 
+<!-- ==================== 通用对话框(重命名 / 删除确认) ==================== -->
+<div id="uiModal" class="modal" hidden>
+    <div class="modal-box card ui-box">
+        <div class="modal-head">
+            <h2 id="uiTitle">标题</h2>
+            <button id="uiClose" type="button" class="mini">关闭</button>
+        </div>
+        <p id="uiText" class="ui-text muted small" hidden></p>
+        <input id="uiInput" type="text" maxlength="40" autocomplete="off" hidden>
+        <div class="ui-foot">
+            <button id="uiCancel" type="button" class="mini">取消</button>
+            <button id="uiOk" type="button">确定</button>
+        </div>
+    </div>
+</div>
+
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/marked.min.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

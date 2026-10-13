@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -108,5 +109,26 @@ class ConversationControllerTest {
 
         verify(service).rename("c1", null);
         verify(service, never()).get(anyString());
+    }
+
+    @Test
+    @DisplayName("记忆域:带 scopeId 就透传(共享给那个会话)")
+    void shareMemoryPassesScope() {
+        when(service.shareMemory("c1", "c2")).thenReturn(meta("c1", "甲"));
+
+        controller.shareMemory("c1", new ConversationController.ScopeRequest("c2"));
+
+        verify(service).shareMemory("c1", "c2");
+    }
+
+    @Test
+    @DisplayName("记忆域:body 为 null / scopeId 为 null 都表示“拆回独立”")
+    void shareMemoryToleratessMissingBody() {
+        when(service.shareMemory(anyString(), any())).thenReturn(meta("c1", "甲"));
+
+        controller.shareMemory("c1", null);
+        controller.shareMemory("c1", new ConversationController.ScopeRequest(null));
+
+        verify(service, times(2)).shareMemory("c1", null);
     }
 }

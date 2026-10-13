@@ -15,8 +15,10 @@ import java.util.List;
  * </ol>
  *
  * <p><b>scopeId(记忆域)</b>:长期记忆按它隔离 —— 默认 {@code scopeId == id},
- * 也就是"每个会话自己一份记忆"。以后要让若干会话共享记忆,就是把它们的 scopeId 改成同一个值。
- * (本批次只落字段、不实现共享逻辑。)
+ * 也就是"每个会话自己一份记忆"。要让若干会话共享记忆,就把它们的 scopeId 指到同一个值
+ * (入口:{@code PUT /api/conversations/{id}/memory-scope},或 
+ * {@link ConversationService#shareMemory});实际读写前会“走到根”,所以指向同一个根的会话
+ * 真的用的是同一份,不存在“以为共享了、其实两边各读写各的”。
  *
  * <p><b>summarizedCount(摘要水位)</b>:短期记忆用的。会话聊长了以后,把最老的一段压成
  * {@code summary} 一句话,再把“已经压掉了几条消息”记在这里 —— 下次拼上下文就从这条之后开始取,

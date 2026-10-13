@@ -22,13 +22,13 @@ import org.springframework.stereotype.Component;
  * 本地跑 1~3 秒/页,一二十钟头的事变成十几分钟,而且离线、零成本、不占配额。
  *
  * <p><b>代价</b>:公式、化学式、复杂表格这类版式是它的弱项(它擅长的是横排中文印刷体)。
- * 所以上层配了「结果体检 + 回退视觉模型」—— 读糊的页自动换 Kimi 重跑,见 {@link OcrEngines}。
+ * 所以上层配了「结果体检 + 回退视觉模型」—— 读糊的页自动换视觉模型重跑,见 {@link OcrEngines}。
  *
  * <p><b>加载时机</b>:native 库和模型(几百 MB)在<b>第一次调用时</b>才从 jar 里解出来加载,
  * 不会拖慢应用启动。而且 {@link InferenceEngine} 是静态单例 —— 一个 JVM 只有一份引擎,
  * 多重启几次也没关系(第二次拿到的还是同一个)。
  *
- * <p>它只在 {@code fa.ocr.engine=rapid} 时才会被创建 —— 用 kimi 的人不必把 onnx 那堆依赖硬拖到运行时
+ * <p>它只在 {@code fa.ocr.engine=rapid} 时才会被创建 —— 不用本地 OCR 的人不必把 onnx 那堆依赖硬拖到运行时
  * (手工 {@code java -cp} 跑 CLI 时尤其明显)。
  */
 @Component

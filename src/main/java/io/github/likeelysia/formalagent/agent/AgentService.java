@@ -27,6 +27,10 @@ import org.springframework.stereotype.Component;
  * </pre>
  *
  * <p>安全网:{@link #MAX_STEPS} 限制轮数 —— 模型有可能反复调工具绕圈,不设上限会把 token 烧光。
+ *
+ * <p><b>流式与非流式共用同一份循环</b>:差别只有"这一轮怎么从模型那儿拿回复"
+ * (一次性 vs 逐字回调)。所以这里把循环抽成一个私有方法,由 {@link TurnSource} 决定取回复的方式 ——
+ * 两套逻辑各写一遍的话,以后改循环(加工具、改步数上限、改日志)必然漏改其中一份。
  */
 @Component
 public class AgentService {
@@ -65,6 +69,25 @@ public class AgentService {
      *                少一条 API 直接报错。
      */
     public AgentResult run(String question, List<AgentMessage> history) {
+        return loop(question, history, null, (messages, definitions) -> llm.chatWithTools(messages, definitions));
+    }
+
+    /**
+     * 流式版:答案边生成边经过 {@code sink} 推出去,返回值仍是完整结果(用于落库 / trace)。
+     */
+    public AgentResult runStream(String question, List<AgentMessage> history, StreamSink sink) {
+        return loop(question, history, sink,
+                (messages, definitions) -> llm.chatWithToolsStream(messages, definitions, sink::onDelta));
+    }
+
+    /** "这一轮怎么从模型那儿拿到回复" —— 一次性的,还是逐字回调的。 */
+    @FunctionalInterface
+    private interface TurnSource {
+        AssistantTurn next(List<AgentMessage> messages, List<ToolDefinition> definitions);
+    }
+
+    /** ReAct 主循环:流式与非流式共用这一份;{@code sink} 为 null 表示不流式。 */
+    private AgentResult loop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
         if (question == null || question.isBlank()) {
             throw new AgentException("问题不能为空");
         }
@@ -80,15 +103,22 @@ public class AgentService {
         List<String> trace = new ArrayList<>();
 
         for (int step = 1; step <= MAX_STEPS; step++) {
-            AssistantTurn turn = llm.chatWithTools(messages, definitions);
+            AssistantTurn turn = source.next(messages, definitions);
             if (!turn.wantsTools()) {                                  // 不需要工具 → 这就是最终答案
                 return new AgentResult(turn.content() == null ? "" : turn.content(), trace, step);
             }
 
+            // 它其实是要调工具 —— 刚才那半句"我查一下…"不是答案,作废重来
+            if (sink != null) {
+                sink.onReset();
+            }
             messages.add(AgentMessage.assistantWithTools(turn.toolCalls()));
             for (ToolCall call : turn.toolCalls()) {
                 String name = call.function() == null ? "?" : call.function().name();
                 String rawArgs = call.function() == null ? "" : call.function().arguments();
+                if (sink != null) {
+                    sink.onStatus("正在查资料(" + name + ")…");
+                }
                 String observation = execute(call);
 
                 trace.add(name + "(" + rawArgs + ")");

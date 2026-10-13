@@ -155,4 +155,104 @@ class ConversationServiceTest {
                 .isInstanceOf(AgentException.class)
                 .hasMessageContaining("会话不存在");
     }
+
+    // ==================== 记忆域(共享 / 拆开) ====================
+
+    @Test
+    @DisplayName("默认:每个会话的记忆域就是它自己")
+    void scopeDefaultsToItself() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+
+        assertThat(service.memoryScopeOf(a.id())).isEqualTo(a.id());
+        assertThat(service.memoryScopeOf(b.id())).isEqualTo(b.id());
+    }
+
+    @Test
+    @DisplayName("共享:乙加入甲 -> 两边解析到同一个记忆域(甲)")
+    void sharePointsToTheSameScope() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+
+        ConversationMeta updated = service.shareMemory(b.id(), a.id());
+
+        assertThat(updated.id()).isEqualTo(b.id());
+        assertThat(updated.scopeId()).isEqualTo(a.id());
+        assertThat(service.memoryScopeOf(b.id())).isEqualTo(service.memoryScopeOf(a.id()));
+    }
+
+    @Test
+    @DisplayName("共享存的是“根”:丙加入已共享的乙 -> 最终指向甲")
+    void shareStoresTheRoot() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+        ConversationMeta c = service.create("丙");
+        service.shareMemory(b.id(), a.id());              // 乙 -> 甲
+
+        assertThat(service.shareMemory(c.id(), b.id()).scopeId()).isEqualTo(a.id());   // 丙 -> 甲(不是乙)
+        assertThat(service.memoryScopeOf(c.id())).isEqualTo(service.memoryScopeOf(a.id()));
+    }
+
+    @Test
+    @DisplayName("链式指向也能走到根:老数据甲->乙、乙->丙,甲应解析到丙")
+    void resolvedByWalkingTheChain() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+        ConversationMeta c = service.create("丙");
+        service.shareMemory(a.id(), b.id());              // 甲 -> 乙
+        service.shareMemory(b.id(), c.id());              // 乙 -> 丙(存的是根:丙,所以乙直接指丙)
+
+        // 就算库里真出现“甲->乙->丙”这种长链,解析也必须走到根
+        assertThat(service.memoryScopeOf(a.id())).isEqualTo(c.id());
+    }
+
+    @Test
+    @DisplayName("加入同一个组不会把自己绕进去(幂等)")
+    void shareIntoOwnGroupIsNoop() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+        service.shareMemory(b.id(), a.id());              // 乙 -> 甲
+
+        ConversationMeta again = service.shareMemory(a.id(), b.id());   // 甲“加入”乙所在的组 -> 还是甲自己
+        assertThat(again.scopeId()).isEqualTo(a.id());
+        assertThat(service.memoryScopeOf(b.id())).isEqualTo(a.id());     // 组没散
+    }
+
+    @Test
+    @DisplayName("拆开:传 null / 穿空 / 传自己 -> 都回到独立(各用各的)")
+    void unshareGoesBackToItself() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+        service.shareMemory(b.id(), a.id());
+
+        assertThat(service.shareMemory(b.id(), null).scopeId()).isEqualTo(b.id());
+        service.shareMemory(b.id(), a.id());
+        assertThat(service.shareMemory(b.id(), "  ").scopeId()).isEqualTo(b.id());
+        service.shareMemory(b.id(), a.id());
+        assertThat(service.shareMemory(b.id(), b.id()).scopeId()).isEqualTo(b.id());
+    }
+
+    @Test
+    @DisplayName("共享对象被删了:仍能解析(不报错、不串到别人家)")
+    void scopeSurvivesTargetDeletion() {
+        ConversationMeta a = service.create("甲");
+        ConversationMeta b = service.create("乙");
+        service.shareMemory(b.id(), a.id());
+
+        service.delete(a.id());
+
+        assertThat(service.memoryScopeOf(b.id())).isEqualTo(a.id());     // 停在那个名字上,记忆文件还在
+    }
+
+    @Test
+    @DisplayName("共享给一个不存在的会话 / 不合理的 id -> 报错")
+    void shareRejectsBadTarget() {
+        ConversationMeta a = service.create("甲");
+
+        assertThatThrownBy(() -> service.shareMemory(a.id(), "ghost"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("会话不存在");
+        assertThatThrownBy(() -> service.shareMemory(a.id(), "../etc/passwd"))
+                .isInstanceOf(AgentException.class);
+    }
 }

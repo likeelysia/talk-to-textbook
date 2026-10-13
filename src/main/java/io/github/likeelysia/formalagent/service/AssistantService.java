@@ -2,6 +2,7 @@ package io.github.likeelysia.formalagent.service;
 
 import io.github.likeelysia.formalagent.agent.AgentResult;
 import io.github.likeelysia.formalagent.agent.AgentService;
+import io.github.likeelysia.formalagent.agent.StreamSink;
 import io.github.likeelysia.formalagent.conversation.Conversation;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
@@ -57,6 +58,22 @@ public class AssistantService {
      * @param displayQuestion 存进历史的那句话(图片链路上是"用户原话 / 几张图")
      */
     public Turn ask(String conversationId, String modelQuestion, String displayQuestion) {
+        return ask(conversationId, modelQuestion, displayQuestion, null);
+    }
+
+    /**
+     * 流式版:和 {@link #ask} 走完全同一套流程(验会话 → 拼历史/摘要 → 跑 Agent → 落库 → 后台提炼),
+     * 只是答案边生成边经过 {@code sink} 推给调用方。
+     *
+     * <p><b>落库和记忆提炼一步不少</b>:它们都在 Agent 跑完之后,与流式无关 ——
+     * 不能因为"答案已经边吐边显示了"就漏掉写历史。
+     */
+    public Turn askStream(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink) {
+        return ask(conversationId, modelQuestion, displayQuestion, sink);
+    }
+
+    /** 一轮问答的真正实现;sink 为 null = 非流式。 */
+    private Turn ask(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink) {
         String id = conversations.requireExisting(conversationId);
         Conversation conversation = conversations.get(id);
 
@@ -79,7 +96,9 @@ public class AssistantService {
         }
         history.addAll(context.messages());
 
-        AgentResult result = agent.run(modelQuestion, history);
+        AgentResult result = (sink == null)
+                ? agent.run(modelQuestion, history)
+                : agent.runStream(modelQuestion, history, sink);
         Conversation recorded = conversations.record(id, displayQuestion, result.answer(), result.trace());
         longTerm.maybeExtract(recorded);          // 攒够几轮就在后台提炼一次(不占用户等答案的时间)
         return new Turn(result, id);

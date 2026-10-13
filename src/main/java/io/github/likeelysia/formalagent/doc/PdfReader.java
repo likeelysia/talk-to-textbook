@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * ② 没有文字层(扫描件/影印版)→ 逐页渲染成图片,交给 {@link OcrEngines} 识别。
  * 出处统一标到页码。
  *
- * <p>走哪个 OCR 引擎(本地 RapidOCR / 远程 Kimi)由配置决定,读取器不关心;页间节奏由引擎自己管。
+ * <p>走哪个 OCR 引擎(本地 RapidOCR / 远程视觉模型)由配置决定,读取器不关心;页间节奏由引擎自己管。
  */
 @Component
 public class PdfReader implements DocumentReader {

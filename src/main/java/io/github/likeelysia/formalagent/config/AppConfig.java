@@ -32,12 +32,35 @@ public record AppConfig(
                       int maxAttempts, long retryBaseMs, long retryMaxMs) {
     }
 
-    /** DeepSeek:文本对话 / 知识点提炼。 */
-    public record Deepseek(String apiUrl, String model, int maxTokens) {
+    /**
+     * DeepSeek:文本对话 / 知识点提炼。
+     *
+     * @param apiKey    直接写在这里的密钥(留空 = 不用,改读环境变量);优先级高于 {@code apiKeyEnv}
+     * @param apiKeyEnv 密钥所在的环境变量名(默认 {@code DEEPSEEK_API_KEY});<b>它是配置,不是代码里的常量</b>
+     */
+    public record Deepseek(String apiUrl, String model, String apiKey, String apiKeyEnv, int maxTokens) {
     }
 
-    /** Kimi 视觉:扫描件 OCR / 图片问答。 */
-    public record Vision(String apiUrl, String model, int maxTokens) {
+    /**
+     * 视觉模型:扫描件 OCR / 图片问答(任何「OpenAI 兼容」的视觉模型都能接)。
+     *
+     * <p>厂商差异只有三件事,全部在这里:端点/模型名、密钥从哪来、厂商专属请求字段。
+     * 换厂商(阿里百炼 / 智谱 / 火山方舟 / 硅基流动 / 本地 Ollama…)= 改这几个字段,代码不动。
+     * 想多厂商并存就用 profile(见 {@code application.yml} 的 qwen / ollama 预设)。
+     *
+     * @param apiKey        直接写在这里的密钥(留空 = 不用,改读环境变量);优先级高于 {@code apiKeyEnv}
+     * @param apiKeyEnv     密钥所在的环境变量名(默认 {@code MOONSHOT_API_KEY})
+     * @param provider      显示名,只用于日志与 {@code /api/health} 上报(如 {@code Kimi} / {@code Qwen-VL})
+     * @param extraBodyJson 厂商专属请求字段(JSON 文本),原样合并进请求体;
+     *                      如 K2.6 需要 {@code {"thinking":{"type":"disabled"}}},不需要就留空。
+     *                      用字符串而不是嵌套 Map:profile 覆盖时能<b>整段替换</b>(Map 是逐键合并,删不掉旧键)
+     */
+    public record Vision(String apiUrl, String model, String apiKey, String apiKeyEnv,
+                         String provider, int maxTokens, String extraBodyJson) {
+
+        public Vision {
+            provider = (provider == null || provider.isBlank()) ? "Vision" : provider;
+        }
     }
 
     /** 本地 embedding 服务。 */

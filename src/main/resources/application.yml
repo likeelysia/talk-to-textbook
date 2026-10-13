@@ -7,6 +7,16 @@ spring:
   application:
     name: formal-agent
 
+  # ---- 静态资源缓存 ----
+  # 前端改了 JS/CSS,浏览器却还拿旧的(得 Ctrl+F5 才生效)—— 就是因为没设这个头。
+  # no-cache ≠ 不缓存,而是**每次都用 Last-Modified 跟服务端核对**:没变就 304(几乎无开销),
+  # 变了立刻拿到新的。想彻底试验可改成 no-store: true(每次都整份重下)。
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true
+
   # ---- 文件上传上限 ----
   # 不配这段就是 Spring Boot 默认(单文件 1MB / 整请求 10MB)→ 灌教材必报 HTTP 413
   servlet:
@@ -31,26 +41,48 @@ fa:
 
   # ---- DeepSeek:文本对话 / 知识点提炼 ----
   deepseek:
-    api-url: https://api.deepseek.com/chat/completions
-    model: deepseek-chat
-    max-tokens: 8192
+    api-url: ${FA_DEEPSEEK_URL:https://api.deepseek.com/chat/completions}
+    model: ${FA_DEEPSEEK_MODEL:deepseek-chat}
+    # 密钥:api-key 直接写值(优先);留空则读 api-key-env 指的那个环境变量
+    api-key: ${FA_DEEPSEEK_API_KEY:}
+    api-key-env: ${FA_DEEPSEEK_KEY_ENV:DEEPSEEK_API_KEY}
+    max-tokens: ${FA_DEEPSEEK_MAX_TOKENS:8192}
 
-  # ---- Kimi 视觉:PDF 扫描件 OCR / 图片问答 ----
+  # ---- 视觉模型:PDF 扫描件 OCR / 图片问答 ----
+  #   任何「OpenAI 兼容」的视觉模型都能接,换厂商 = 改这几行(代码不动):
+  #     · 阿里百炼  api-url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  #                 model: qwen-vl-max        api-key-env: DASHSCOPE_API_KEY   extra-body-json: ''
+  #     · 智谱 GLM-4V  api-url: https://open.bigmodel.cn/api/paas/v4/chat/completions   model: glm-4v-plus
+  #     · 火山方舟豆包  api-url: https://ark.cn-beijing.volces.com/api/v3/chat/completions   model: <接入点 id>
+  #     · 本地 Ollama  api-url: http://127.0.0.1:11434/v1/chat/completions   model: qwen2.5vl   extra-body-json: ''
+  #   也可以不动这里的默认值,直接用现成的 profile 预设(文件末尾 qwen / ollama)
   vision:
-    api-url: https://api.moonshot.cn/v1/chat/completions
-    model: kimi-k2.6
-    max-tokens: 4096
+    api-url: ${FA_VISION_URL:https://api.moonshot.cn/v1/chat/completions}
+    model: ${FA_VISION_MODEL:kimi-k2.6}
+    # 显示名:只用于日志和 /api/health 上报
+    provider: ${FA_VISION_PROVIDER:Kimi}
+    # 密钥:api-key 直接写值(优先);留空则读 api-key-env 指的那个环境变量
+    api-key: ${FA_VISION_API_KEY:}
+    api-key-env: ${FA_VISION_KEY_ENV:MOONSHOT_API_KEY}
+    max-tokens: ${FA_VISION_MAX_TOKENS:4096}
+    # 厂商专属请求字段(JSON 文本),原样合并进请求体。
+    #   K2.6 需要关掉思考(照抄任务不需要“想”);换厂商就改成对方要的字段,不需要就写 ''(空)。
+    #   用字符串而不是嵌套结构:profile 覆盖时能整段替换;写错的话启动就报错。
+    extra-body-json: '{"thinking":{"type":"disabled"}}'
 
   # ---- OCR 引擎(扫描件/影印版 PDF 用)----
-  #   engine: kimi(远程视觉模型,准、能读公式,但慢且有组织级 3 RPM 限流)
-  #           rapid(本地 RapidOCR/PP-OCRv4,快、离线、零成本,公式是弱项)
+  #   engine: vision(远程多模态视觉模型,准、能读公式,但慢且有限流)
+  #           rapid (本地 RapidOCR/PP-OCRv4,快、离线、零成本,公式是弱项)
   ocr:
-    engine: ${FA_OCR_ENGINE:kimi}
-    # 本地读得可疑(或直接失败)时,自动换 kimi 把这一页重读一遍
-    fallback-to-kimi: ${FA_OCR_FALLBACK_KIMI:true}
-    kimi:
+    engine: ${FA_OCR_ENGINE:vision}
+    # 主引擎读得可疑(或直接失败)时,自动换下面这个引擎重读一遍
+    fallback-to-vision: ${FA_OCR_FALLBACK_VISION:true}
+    # 兜底引擎是谁也由配置说了算(不再硬认某个名字);旧名 kimi / moonshot 仍作为别名认到 vision
+    fallback-engine: ${FA_OCR_FALLBACK_ENGINE:vision}
+    vision:
       # 页间最小间隔(毫秒):语义是「两次调用的开始时刻至少相隔这么久」
       #   默认 1500 = 只躲「组织并发 = 1」;撞 429(组织级 3 RPM)时调成 21000(60 秒内最多 3 次)
+      #   ⚠️ 旧名 fa.ocr.kimi.page-gap-ms 仍然认(两个都写了的话,新名优先)
       page-gap-ms: ${FA_OCR_PAGE_GAP_MS:1500}
     # 去噪:OCR 结果里只要有一行包含其中任一关键字,整行丢掉(扫描 App 的水印)
     #   逗号 / 分号 / 竖线分隔;留空 = 不过滤
@@ -60,7 +92,7 @@ fa:
       num-threads: ${FA_OCR_THREADS:0}
       # 按长边缩放;0 = 不缩放(最清晰也最慢)
       max-side-len: ${FA_OCR_MAX_SIDE_LEN:0}
-    # “体检”阈值:不达标就认为本地读糊了 → 回退 kimi
+    # “体检”阈值:不达标就认为本地读糊了 → 回退兜底引擎
     quality:
       min-chars: ${FA_OCR_MIN_CHARS:30}
       min-chinese-ratio: ${FA_OCR_MIN_CHINESE_RATIO:0.2}
@@ -144,3 +176,37 @@ spring:
       on-profile: dev
 fa:
   debug: true
+
+---
+## ============================================================================
+##  视觉模型预设 —— 换厂商不改代码,只换 profile:
+##      java -jar app.jar --spring.profiles.active=qwen
+##  与 dev 可叠加:--spring.profiles.active=dev,qwen
+##  只覆盖 fa.vision.*,其余配置照旧(记得先把对应厂商的密钥配好)
+## ============================================================================
+spring:
+  config:
+    activate:
+      on-profile: qwen
+fa:
+  vision:
+    api-url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+    model: qwen-vl-max
+    provider: Qwen-VL
+    api-key-env: DASHSCOPE_API_KEY
+    extra-body-json: ''          # 通义千问不需要 thinking 字段(整段清掉)
+
+---
+## 本地 Ollama:完全离线、不花钱(先拉模型:ollama pull qwen2.5vl)
+## ⚠️ 本地小模型的公式识别质量明显不如云端大模型 —— 先拿几页公式页对拍再量产
+spring:
+  config:
+    activate:
+      on-profile: ollama
+fa:
+  vision:
+    api-url: http://127.0.0.1:11434/v1/chat/completions
+    model: qwen2.5vl
+    provider: Ollama
+    api-key: ollama             # 本地服务不校验密钥,但请求头得有个值
+    extra-body-json: ''

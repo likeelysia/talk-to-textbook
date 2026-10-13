@@ -29,6 +29,9 @@ public class LocalEmbeddingClient implements EmbeddingClient {
     /** 一次请求带几条文本(本地服务对批量输入有条数/显存限制,分批稳妥)。 */
     private static final int BATCH_SIZE = 16;
 
+    /** 健康探测的超时(毫秒):/health 是轻量端点,超过这个数还没回就当它挂了,别拖慢调用方。 */
+    private static final long HEALTH_TIMEOUT_MS = 600;
+
     private final HttpClient client;
     private final ObjectMapper mapper;
     private final AppConfig config;
@@ -49,6 +52,30 @@ public class LocalEmbeddingClient implements EmbeddingClient {
     @Override
     public float[] embed(String text) {
         return embedAll(List.of(text)).get(0);
+    }
+
+    /**
+     * 打 llama-server 自己的 {@code GET /health}(模型加载完回 200,加载中回 503)。
+     *
+     * <p>走的是轻量端点,**不消耗 embedding 算力**,所以 /api/health 可以随便被监控轮询。
+     */
+    @Override
+    public String health() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(config.embedding().url() + "/health"))
+                    .timeout(Duration.ofMillis(HEALTH_TIMEOUT_MS))
+                    .GET()
+                    .build();
+            HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+            int code = response.statusCode();
+            return (code >= 200 && code < 300) ? "UP" : "DOWN";
+        } catch (IOException e) {
+            return "DOWN";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "DOWN";
+        }
     }
 
     @Override
