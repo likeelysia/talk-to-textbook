@@ -1,6 +1,6 @@
 package io.github.likeelysia.formalagent.cli;
 
-import io.github.likeelysia.formalagent.FormalAgentApplication;
+import io.github.likeelysia.formalagent.TalkToTextbookApplication;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.extract.CheckpointIngestService;
 import io.github.likeelysia.formalagent.extract.IngestProgress;
@@ -101,7 +101,7 @@ public class IngestMain {
             return;
         }
 
-        try (ConfigurableApplicationContext ctx = new SpringApplicationBuilder(FormalAgentApplication.class)
+        try (ConfigurableApplicationContext ctx = new SpringApplicationBuilder(TalkToTextbookApplication.class)
                 .web(WebApplicationType.NONE)          // 命令行工具:不要 Web 容器
                 .bannerMode(Banner.Mode.OFF)           // 别刷 Boot 那个大 LOGO
                 .logStartupInfo(false)

@@ -1,4 +1,4 @@
-# Formal Agent
+# Talk to Textbook
 
 > 我的第一个开源 AI Agent 项目 —— 边学边建,公开记录。
 > My first open-source AI Agent project — building it in public while learning.
@@ -155,19 +155,19 @@ start-embedding.bat          # 起在 http://127.0.0.1:8090
 
 ```bash
 mvn clean test               # 跑测试(285 个)
-mvn clean package            # 打包 → target/formal-agent-0.1.0-SNAPSHOT.jar
+mvn clean package            # 打包 → target/talk-to-textbook-0.1.0-SNAPSHOT.jar
 
 # 【默认】启动 HTTP 服务(内嵌 Tomcat,端口 8080)
-java -jar target/formal-agent-0.1.0-SNAPSHOT.jar
+java -jar target/talk-to-textbook-0.1.0-SNAPSHOT.jar
 
 # 交互式命令行(想聊天/传文件时)
-java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --fa.cli.enabled=true
+java -jar target/talk-to-textbook-0.1.0-SNAPSHOT.jar --fa.cli.enabled=true
 
 # 带 profile(dev 打开调试输出)
-java -jar target/formal-agent-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
+java -jar target/talk-to-textbook-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
 ```
 
-也可以在 IDEA 里直接运行 `FormalAgentApplication`(绿色 ▶)。
+也可以在 IDEA 里直接运行 `TalkToTextbookApplication`(绿色 ▶)。
 
 启动后浏览器打开 <http://localhost:8080/> —— 就是网页问答界面。
 
@@ -277,7 +277,7 @@ curl -F "file=@C:/资料/物理.pdf" http://localhost:8080/api/ingest
 
 ```
 src/main/java/io/github/likeelysia/formalagent/
-├── FormalAgentApplication.java   # Spring Boot 启动类
+├── TalkToTextbookApplication.java   # Spring Boot 启动类
 ├── chat/       # ChatSession、Message —— 命令行时代的会话与消息(保留)
 ├── conversation/ # Conversation / ChatMessage / ConversationStore(JSON 落盘)/ ConversationService —— 多会话(对话框)
 ├── memory/     # ShortTermMemory(窗口裁剪)/ SessionSummarizer —— 短期记忆;LongTermMemory / MemoryStore / MemoryExtractor / MemoryCandidate —— 长期记忆(提炼 + 召回 + 治理)

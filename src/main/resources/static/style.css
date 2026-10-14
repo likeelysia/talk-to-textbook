@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------
-   Formal Agent 前端样式:极简卡片 + 气泡对话
+   Talk to Textbook 前端样式:极简卡片 + 气泡对话
    无框架、无构建 —— 浏览器直接加载
    --------------------------------------------------------------- */
 :root {
@@ -245,13 +245,15 @@ body.contact-page {
     display: flex; align-items: center; gap: 6px;
     border-radius: 9px; padding: 6px 8px; border: 1px solid transparent;
 }
-.conv-item:hover { background: #f3f5fb; }
+.conv-item:hover { background: #f1f4fb; }
 .conv-item.active { background: #eef1fe; border-color: #d6ddff; }
 .conv-title {
     flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: left;
     color: var(--text); font-size: 14px; cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 悬停:名字微微变蓝就好 —— 否则全局 button:hover 会把整块染成品牌蓝,盖住名字 */
+.conv-title:hover { background: transparent; color: var(--brand-dark); }
 .conv-item.active .conv-title { color: var(--brand-dark); font-weight: 600; }
 .conv-tools { display: none; gap: 2px; }
 .conv-item:hover .conv-tools, .conv-item.active .conv-tools { display: flex; }
@@ -350,4 +352,135 @@ button.danger:hover { background: #b93b36; }
     body:not(.contact-page) { overflow: visible; display: block; }
     .chat { min-height: 60vh; }
     .messages { max-height: 62vh; }
+}
+
+/* ---------------- 📝 存笔记 / 📒 笔记本 ---------------- */
+
+/* 输入排里的「存笔记」按钮:开启勾选模式时高亮 */
+#noteBtn.active {
+    background: var(--brand);
+    color: #fff;
+    border-color: var(--brand);
+}
+
+/* 勾选模式下:用户提问气泡左侧留出勾选框的位置 */
+.bubble.user.selectable {
+    position: relative;
+    padding-left: 34px;
+}
+
+.bubble.user .pick-box {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.bubble .bubble-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 笔记本:一行一条问题(按钮) */
+.note-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 46vh;
+    max-height: 72vh;
+    overflow-y: auto;
+    margin: 10px 0;
+}
+
+/* 一条笔记 = 一行:[问题(按钮)] …… [× 删除] */
+.note-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fafbfc;
+}
+
+.note-row:hover {
+    border-color: var(--brand);
+}
+
+/* 点它打开详情 */
+.note-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    text-align: left;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+
+.note-open:hover { background: #f2f7ff; }
+
+/* 删除:叉号 */
+.note-del {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: #fff;
+    color: var(--error);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.note-del:hover {
+    background: #fdecea;
+    border-color: var(--error);
+}
+
+.note-q {
+    font-weight: 600;
+    color: #000;                   /* 问题文字:黑色 */
+    word-break: break-word;
+}
+
+.note-meta { font-size: 12px; }
+
+/* 笔记详情 */
+.note-detail {
+    min-height: 46vh;
+    max-height: 76vh;
+    overflow-y: auto;
+    margin: 10px 0;
+}
+
+.note-q-h {
+    margin: 0 0 6px;
+    font-size: 16px;
+    word-break: break-word;
+}
+
+.note-answer {
+    border-top: 1px dashed var(--line);
+    padding-top: 10px;
+    margin-top: 10px;
+}
+
+@media (max-width: 860px) {
+    .note-list { min-height: 40vh; max-height: 64vh; }
+    .note-detail { min-height: 40vh; max-height: 66vh; }
 }

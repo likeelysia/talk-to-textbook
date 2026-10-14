@@ -39,5 +39,12 @@
   { "query": "帮我写一首关于春天的诗", "expectName": null, "expectPage": null },
   { "query": "Python 里怎么读取一个 CSV 文件", "expectName": null, "expectPage": null },
   { "query": "推荐几部好看的科幻电影", "expectName": null, "expectPage": null },
-  { "query": "一美元现在能换多少人民币", "expectName": null, "expectPage": null }
+  { "query": "一美元现在能换多少人民币", "expectName": null, "expectPage": null },
+
+  { "query": "What does the word realm mean?", "expectName": "realm", "expectPage": "第 53 页" },
+  { "query": "comparison and contrast essay 怎么写", "expectName": "comparison / contrast essay", "expectPage": "第 96 页" },
+  { "query": "what signal words are used for comparison and contrast", "expectName": "Comparison/contrast signal words", "expectPage": "第 99 页" },
+  { "query": "digital and physical realms 是什么意思", "expectName": "digital and physical realms", "expectPage": "第 39 页" },
+  { "query": "vast realm 的用法", "expectName": "vast realm", "expectPage": "第 53 页" },
+  { "query": "noteworthy films 什么意思", "expectName": "noteworthy films", "expectPage": "第 47 页" }
 ]

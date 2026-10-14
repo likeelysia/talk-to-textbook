@@ -132,7 +132,9 @@ public class DeepSeekClient implements LlmClient {
                     .build();
 
             long start = System.currentTimeMillis();
-            HttpResponse<String> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = HttpCalls.send(
+                    client, httpRequest, HttpResponse.BodyHandlers.ofString(),
+                    config.llm().requestTimeoutSeconds());
             long cost = System.currentTimeMillis() - start;
 
             ApiLogger.record(config.deepseek().model(), response.statusCode(), cost,
@@ -159,9 +161,6 @@ public class DeepSeekClient implements LlmClient {
             throw new AgentException("JSON 处理失败:" + e.getMessage(), e);
         } catch (IOException e) {
             throw new TransientApiException("网络异常:" + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AgentException("调用被中断", e);
         }
     }
 

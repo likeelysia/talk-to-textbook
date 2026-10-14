@@ -14,14 +14,14 @@
 
     <!-- ========== 坐标:项目的全球唯一标识 ========== -->
     <groupId>io.github.likeelysia</groupId>
-    <artifactId>formal-agent</artifactId>
+    <artifactId>talk-to-textbook</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <!-- ========== 门面信息:开源项目必备 ========== -->
-    <name>Formal Agent</name>
+    <name>Talk to Textbook</name>
     <description>My first open-source AI Agent project. 我的第一个开源 AI Agent 项目。</description>
-    <url>https://github.com/likeelysia/formal-agent</url>
+    <url>https://github.com/likeelysia/talk-to-textbook</url>
 
     <licenses>
         <license>
@@ -40,15 +40,15 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://github.com/likeelysia/formal-agent.git</connection>
-        <developerConnection>scm:git:git@github.com:likeelysia/formal-agent.git</developerConnection>
-        <url>https://github.com/likeelysia/formal-agent</url>
+        <connection>scm:git:https://github.com/likeelysia/talk-to-textbook.git</connection>
+        <developerConnection>scm:git:git@github.com:likeelysia/talk-to-textbook.git</developerConnection>
+        <url>https://github.com/likeelysia/talk-to-textbook</url>
         <tag>HEAD</tag>
     </scm>
 
     <issueManagement>
         <system>GitHub</system>
-        <url>https://github.com/likeelysia/formal-agent/issues</url>
+        <url>https://github.com/likeelysia/talk-to-textbook/issues</url>
     </issueManagement>
 
     <!-- ========== 编译参数(Boot 父工程据此设置编译 release) ========== -->

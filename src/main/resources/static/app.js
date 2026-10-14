@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------
-   Formal Agent 前端逻辑(原生 JS,无框架)
+   Talk to Textbook 前端逻辑(原生 JS,无框架)
 
    它只干三件事:
      1. 把用户输入(文字 / 一批图片)塞进 HTTP 请求
@@ -100,6 +100,11 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !uiModal
 const CONV_STORAGE_KEY = 'fa.conversationId';
 let currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
 let defaultConversationId = 'default';
+
+/* ---- 📝 存笔记(勾选模式)状态 ---- */
+let noteSelectMode = false;          // 是否正处在「勾选提问」模式
+let noteSelected = new Set();        // 勾中的消息下标(只可能是 role=user 的)
+let noteSavedThisRound = false;      // 这一轮勾选里已经保存过了吗(决定退出时要不要问)
 
 const GREETING = '你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。每个对话各自独立记忆,想另起一个话题就点左上角「＋ 新建」。';
 
@@ -500,6 +505,7 @@ function renderConversationList(convs) {
 
 /** 切到另一个对话:先记住,再把它的聊天记录画出来。 */
 async function switchConversation(id) {
+    if (noteSelectMode) await exitNoteSelect(false);   // 切对话也算"退出勾选",没保存会问一句
     if (id === currentConversationId) return;
     currentConversationId = id;
     localStorage.setItem(CONV_STORAGE_KEY, id);
@@ -507,9 +513,9 @@ async function switchConversation(id) {
     await loadThread(id);
 }
 
-function renderStoredMessage(m) {
+function renderStoredMessage(m, index) {
     if (m.role === 'user') {
-        addBubble('user', `<div>${escapeHtml(m.content)}</div>`);
+        addUserBubble(m.content, index);          // 存笔记模式下会带上勾选框
     } else if (m.role === 'assistant') {
         const trace = m.trace || [];
         addBubble('bot', renderAnswer({ answer: m.content, trace, steps: trace.length }));
@@ -532,7 +538,7 @@ async function loadThread(id) {
     if (!msgs.length) {
         addBubble('bot', GREETING);
     } else {
-        msgs.forEach(renderStoredMessage);
+        msgs.forEach((m, i) => renderStoredMessage(m, i));
     }
     loadMemoryCount();                 // 顺手把这个对话“记住了几条”刷到按钮上
 }
@@ -614,6 +620,7 @@ function bubbleThumbsHtml() {
 
 formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (noteSelectMode) { setHint('先退出「存笔记」模式,再提问'); return; }
     if (streamCtrl) return;                            // 正在生成,别叠着发
     const question = questionEl.value.trim();
     if (!question && !picked.length) return;
@@ -1173,6 +1180,210 @@ memForgetBtn.addEventListener('click', async () => {
     } catch (e) {
         window.alert('没清掉:' + e.message);
     }
+});
+
+/* ---------------- 📝 存笔记 / 📒 笔记本 ----------------
+
+   用法:点「📝 存笔记」→ 消息区里每条「你问过的问题」旁边出现勾选框 →
+   勾几个 → 点「保存」→ 存进笔记本;再点「存笔记」= 退出。
+   勾了但没保存就退出 → 问一句「要不要保存」。
+   ------------------------------------------------------------------ */
+
+const noteBtn = document.getElementById('noteBtn');
+const noteSaveBtn = document.getElementById('noteSave');
+const openNotebookBtn = document.getElementById('openNotebook');
+const notebookModal = document.getElementById('notebookModal');
+const closeNotebookBtn = document.getElementById('closeNotebook');
+const noteListEl = document.getElementById('noteList');
+const noteExportBtn = document.getElementById('noteExport');
+const noteModal = document.getElementById('noteModal');
+const closeNoteBtn = document.getElementById('closeNote');
+const noteDetailEl = document.getElementById('noteDetail');
+
+let currentNoteId = null;
+
+/** 带「可勾选」能力的用户气泡:勾选模式下旁边多一个勾选框。 */
+function addUserBubble(text, index) {
+    const div = document.createElement('div');
+    div.className = 'bubble user';
+    if (noteSelectMode && typeof index === 'number') {
+        div.classList.add('selectable');
+        div.dataset.idx = String(index);
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.className = 'pick-box';
+        box.checked = noteSelected.has(index);
+        box.addEventListener('change', () => {
+            if (box.checked) noteSelected.add(index);
+            else noteSelected.delete(index);
+            renderNoteButton();
+        });
+        div.appendChild(box);
+    }
+    const body = document.createElement('div');
+    body.className = 'bubble-body';
+    body.innerHTML = escapeHtml(String(text ?? ''));
+    div.appendChild(body);
+    messagesEl.appendChild(div);
+    scrollToBottom(true);
+    return div;
+}
+
+function renderNoteButton() {
+    if (!noteSelectMode) {
+        noteBtn.textContent = '📝 存笔记';
+        noteBtn.classList.remove('active');
+        noteSaveBtn.hidden = true;
+        return;
+    }
+    noteBtn.textContent = noteSelected.size ? `已完成(${noteSelected.size})` : '已完成';
+    noteBtn.classList.add('active');
+    noteSaveBtn.hidden = noteSelected.size === 0;
+    noteSaveBtn.textContent = `保存 (${noteSelected.size})`;
+}
+
+async function toggleNoteSelect() {
+    if (noteSelectMode) { await exitNoteSelect(true); return; }
+    if (streamCtrl) { setHint('等这次回答生成完,再存笔记'); return; }
+    noteSelectMode = true;
+    noteSelected = new Set();
+    noteSavedThisRound = false;
+    await loadThread(currentConversationId);      // 从服务端重画 → 消息下标绝对准确
+    renderNoteButton();
+    setHint('勾选你想存下来的提问,再点「保存」;再点「存笔记」= 退出');
+}
+
+/**
+ * 退出勾选模式。
+ *
+ * @param askWhenDirty 勾了但没保存 → 弹框问一句「要不要保存」
+ */
+async function exitNoteSelect(askWhenDirty) {
+    if (!noteSelectMode) return;
+    if (askWhenDirty && noteSelected.size > 0 && !noteSavedThisRound) {
+        const save = await uiDialog({
+            title: '还没保存',
+            text: `你还勾着 ${noteSelected.size} 个问题没有保存。点「确定」存进笔记本;点「取消」= 不保存退出。`,
+            okText: '保存'
+        });
+        if (save) await saveNotes();
+    }
+    noteSelectMode = false;
+    noteSelected = new Set();
+    noteSavedThisRound = false;
+    await loadThread(currentConversationId);
+    renderNoteButton();
+}
+
+async function saveNotes() {
+    const indexes = Array.from(noteSelected).sort((a, b) => a - b);
+    if (!indexes.length) return;
+    try {
+        const res = await apiJson('/api/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId: currentConversationId, indexes })
+        });
+        noteSavedThisRound = true;
+        setHint(`已存入笔记本 ${res.savedCount} 条`
+            + (res.skippedCount ? `(跳过重复 ${res.skippedCount} 条)` : ''));
+    } catch (e) {
+        window.alert('存笔记失败:' + e.message);
+    }
+}
+
+async function openNotebook() {
+    notebookModal.hidden = false;
+    noteListEl.innerHTML = '加载中…';
+    try {
+        const data = await apiJson('/api/notes');
+        renderNoteList(data.notes || []);
+    } catch (e) {
+        noteListEl.innerHTML = '<p class="muted small">读不出来:' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function closeNotebook() { notebookModal.hidden = true; }
+
+function renderNoteList(notes) {
+    noteListEl.innerHTML = '';
+    if (!notes.length) {
+        noteListEl.innerHTML = '<p class="muted small">还没有笔记。在对话里点「📝 存笔记」勾几个问题试试。</p>';
+        return;
+    }
+    notes.forEach(n => {
+        const row = document.createElement('div');
+        row.className = 'note-row';
+
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'note-open';
+        open.innerHTML = `<span class="note-q">${escapeHtml(n.question)}</span>`
+            + `<span class="note-meta muted small">${n.answerCount} 条回答 · ${formatTime(n.savedAt)}</span>`;
+        open.addEventListener('click', () => openNote(n.id));
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'note-del';
+        del.title = '删除这条笔记';
+        del.setAttribute('aria-label', '删除');
+        del.textContent = '×';
+        del.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteNoteById(n.id);
+        });
+
+        row.appendChild(open);
+        row.appendChild(del);
+        noteListEl.appendChild(row);
+    });
+}
+
+async function openNote(id) {
+    noteModal.hidden = false;
+    noteDetailEl.innerHTML = '加载中…';
+    currentNoteId = id;
+    try {
+        const n = await apiJson('/api/notes/' + encodeURIComponent(id));
+        const answers = (n.answers || []).map(a =>
+            '<div class="note-answer">'
+            + renderAnswer({ answer: a.text, trace: a.trace, steps: (a.trace || []).length })
+            + `<div class="muted small">${formatTime(a.at)}</div></div>`).join('');
+        noteDetailEl.innerHTML =
+            `<h3 class="note-q-h">📌 ${escapeHtml(n.question)}</h3>`
+            + `<p class="muted small">存于 ${formatTime(n.savedAt)}</p>`
+            + (answers || '<p class="muted small">这条问题当时还没有回答。</p>');
+    } catch (e) {
+        noteDetailEl.innerHTML = '<p class="muted small">读不出来:' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+function closeNote() { noteModal.hidden = true; }
+
+async function deleteNoteById(id) {
+    const ok = await uiDialog({ title: '删除笔记', text: '删了就真没了。', okText: '删除', danger: true });
+    if (!ok) return;
+    try {
+        await apiJson('/api/notes/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (currentNoteId === id) closeNote();      // 正开着它的详情就一并关掉
+        await openNotebook();                       // 列表立即刷新
+    } catch (e) {
+        window.alert('删除失败:' + e.message);
+    }
+}
+
+noteBtn.addEventListener('click', toggleNoteSelect);
+noteSaveBtn.addEventListener('click', async () => { await saveNotes(); await exitNoteSelect(false); });
+openNotebookBtn.addEventListener('click', openNotebook);
+closeNotebookBtn.addEventListener('click', closeNotebook);
+notebookModal.addEventListener('click', (e) => { if (e.target === notebookModal) closeNotebook(); });
+closeNoteBtn.addEventListener('click', closeNote);
+noteModal.addEventListener('click', (e) => { if (e.target === noteModal) closeNote(); });
+noteExportBtn.addEventListener('click', () => { window.location = '/api/notes/export'; });   // 后端带 Content-Disposition,直接当附件下载
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!noteModal.hidden) closeNote();
+    else if (!notebookModal.hidden) closeNotebook();
 });
 
 loadKnowledge();

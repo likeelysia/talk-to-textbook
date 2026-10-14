@@ -119,7 +119,9 @@ public class OpenAiCompatibleVisionClient implements VisionClient {
                     .build();
 
             long start = System.currentTimeMillis();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = HttpCalls.send(
+                    client, request, HttpResponse.BodyHandlers.ofString(),
+                    config.llm().requestTimeoutSeconds());
             long cost = System.currentTimeMillis() - start;
 
             ApiLogger.record(v.model(), response.statusCode(), cost,
@@ -148,9 +150,6 @@ public class OpenAiCompatibleVisionClient implements VisionClient {
             throw new AgentException("JSON 处理失败:" + e.getMessage(), e);
         } catch (IOException e) {
             throw new TransientApiException("调用" + tag() + "失败(IO):" + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AgentException("调用被中断", e);
         }
     }
 

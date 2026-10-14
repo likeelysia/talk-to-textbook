@@ -98,7 +98,9 @@ public class LocalEmbeddingClient implements EmbeddingClient {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = HttpCalls.send(
+                    client, request, HttpResponse.BodyHandlers.ofString(),
+                    config.llm().requestTimeoutSeconds());
             int code = response.statusCode();
             if (code < 200 || code >= 300) {
                 throw new TransientApiException("embedding 服务返回错误(" + code + "):" + abbreviate(response.body()));
@@ -113,9 +115,6 @@ public class LocalEmbeddingClient implements EmbeddingClient {
             throw new AgentException("embedding JSON 处理失败:" + e.getMessage(), e);
         } catch (IOException e) {
             throw new TransientApiException("连接 embedding 服务失败(是不是没启动?):" + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AgentException("embedding 调用被中断", e);
         }
     }
 

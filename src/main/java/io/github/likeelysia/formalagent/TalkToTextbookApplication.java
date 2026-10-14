@@ -14,9 +14,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * <p>启动后干什么由容器里的 {@code CommandLineRunner} 决定(当前是 {@code cli.ChatCli} 的交互式命令行)。
  */
 @SpringBootApplication
-public class FormalAgentApplication {
+public class TalkToTextbookApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(FormalAgentApplication.class, args);
+        SpringApplication.run(TalkToTextbookApplication.class, args);
     }
 }

@@ -1,11 +1,11 @@
 ## ============================================================================
-##  Formal Agent 配置(Spring Boot 自动从 classpath 根读取 application.yml)
+##  Talk to Textbook 配置(Spring Boot 自动从 classpath 根读取 application.yml)
 ##  · fa.* 前缀绑定到 AppConfig(@ConfigurationProperties)
 ##  · ${ENV_VAR:默认值} 写法 = 允许用环境变量覆盖
 ## ============================================================================
 spring:
   application:
-    name: formal-agent
+    name: talk-to-textbook
 
   # ---- 静态资源缓存 ----
   # 前端改了 JS/CSS,浏览器却还拿旧的(得 Ctrl+F5 才生效)—— 就是因为没设这个头。
@@ -100,13 +100,14 @@ fa:
   # ---- 本地 embedding 服务(llama.cpp llama-server)----
   embedding:
     url: ${FA_EMBEDDING_URL:http://127.0.0.1:8090}
-    model: bge-small-zh-v1.5
+    # 多语言(中英)embedding:换模型 = 向量指纹变 → 旧 base.vectors.json 自动作废重算
+    model: ${FA_EMBEDDING_MODEL:bge-m3}
 
   # ---- 知识库 ----
   knowledge:
     file: ${FA_KNOWLEDGE_FILE:knowledge/base.json}
     # 混合检索的相似度阈值:低于它就当作“没找到”(0=不过滤)。调大更保守、调小更容易命中。
-    min-score: ${FA_KNOWLEDGE_MIN_SCORE:0.35}
+    min-score: ${FA_KNOWLEDGE_MIN_SCORE:0.45}
 
   # ---- 客户端上传的教材落盘目录 ----
   upload:
@@ -115,6 +116,11 @@ fa:
   # ---- 会话(对话框):一个会话一个 JSON 文件 + 一份 index.json 列表 ----
   conversation:
     dir: ${FA_CONVERSATION_DIR:data/conversations}
+
+  # ---- 笔记本(「存笔记」功能)----
+  #   跨会话全局一本:用户勾选自己的提问 → 连同「AI 对这一问的相关回答」一起存进来
+  note:
+    dir: ${FA_NOTE_DIR:data/notes}
 
   # ---- 记忆(短期 = 会话内上下文窗口;长期 = 跨轮累积的事实 / 偏好)----
   #   模型本身不会“记得”上一句 —— 每次请求都得把“之前聊过什么”重新喂给它。

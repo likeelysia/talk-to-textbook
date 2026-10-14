@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Formal Agent · 教材问答</title>
+    <title>Talk to Textbook · 教材问答</title>
     <link rel="stylesheet" href="/style.css">
     <!-- 公式(KaTeX)+ 样式,和字体一起放在本地,断网也能用 -->
     <link rel="stylesheet" href="/vendor/katex/katex.min.css">
@@ -11,7 +11,7 @@
 <body>
 
 <header>
-    <h1>📘 Formal Agent</h1>
+    <h1>📘 Talk to Textbook</h1>
     <p class="sub">把教材变成「会自己查资料」的问答助手</p>
 </header>
 
@@ -24,6 +24,7 @@
         </div>
         <div id="convList" class="conv-list">加载中…</div>
         <button id="openMemory" type="button" class="mini mem-btn" title="看看这个对话记住了什么">🧠 记忆</button>
+        <button id="openNotebook" type="button" class="mini mem-btn" title="看存下来的提问和 AI 的相关回答">📒 笔记本</button>
         <p class="conv-note muted small">每个对话的记忆互相独立。</p>
     </aside>
 
@@ -50,6 +51,8 @@
             <label class="icon-btn" id="pickLabel" title="上传图片提问(最多 10 张)">
                 🖼️<input id="images" type="file" accept="image/*" multiple hidden>
             </label>
+            <button id="noteBtn" type="button" class="ghost" title="勾选你问过的问题,存进笔记本">📝 存笔记</button>
+            <button id="noteSave" type="button" hidden>保存 (0)</button>
             <button id="send" type="submit">提问</button>
             <button id="stop" type="button" class="ghost" hidden title="停止生成">停止</button>
         </form>
@@ -92,6 +95,34 @@
             <button id="memExport" type="button" class="mini">导出 JSON</button>
             <button id="memForgetAll" type="button" class="mini danger">忘掉全部</button>
         </div>
+    </div>
+</div>
+
+<!-- ==================== 笔记本(存下来的提问)==================== -->
+<div id="notebookModal" class="modal" hidden>
+    <div class="modal-box card">
+        <div class="modal-head">
+            <h2>📒 笔记本</h2>
+            <button id="closeNotebook" type="button" class="mini">关闭</button>
+        </div>
+        <p class="muted small">
+            你存下来的提问(跨对话汇总)。点一条,看它和 AI 的相关回答。
+        </p>
+        <div id="noteList" class="note-list">加载中…</div>
+        <div class="mem-foot">
+            <button id="noteExport" type="button" class="mini">导出 JSON</button>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== 笔记详情 ==================== -->
+<div id="noteModal" class="modal" hidden>
+    <div class="modal-box card">
+        <div class="modal-head">
+            <h2>📄 笔记</h2>
+            <button id="closeNote" type="button" class="mini">关闭</button>
+        </div>
+        <div id="noteDetail" class="note-detail">加载中…</div>
     </div>
 </div>
 
