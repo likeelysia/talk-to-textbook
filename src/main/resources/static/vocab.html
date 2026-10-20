@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>背词工具 · Talk to Textbook</title>
+<style>
+  :root { --brand1:#667eea; --brand2:#764ba2; --ink:#2d2a45; --muted:#8a8a9a; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+    min-height:100vh; padding:24px;
+  }
+  .card {
+    max-width:1080px; margin:0 auto; background:#fff; border-radius:16px;
+    box-shadow:0 12px 40px rgba(0,0,0,.25); padding:28px 32px;
+  }
+  h1 { font-size:24px; color:#333; margin-bottom:6px; }
+  .sub { color:#888; font-size:13px; margin-bottom:20px; line-height:1.6; }
+  textarea {
+    width:100%; height:200px; resize:vertical; border:2px solid #e0e0e0;
+    border-radius:10px; padding:14px; font-size:14px; line-height:1.6;
+    font-family:Consolas,monospace; outline:none; transition:border-color .2s;
+  }
+  textarea:focus { border-color:var(--brand1); }
+  .btn-row { display:flex; gap:12px; margin:16px 0; flex-wrap:wrap; }
+  .btn {
+    padding:11px 22px; border:none; border-radius:10px; font-size:15px;
+    font-weight:bold; cursor:pointer; color:#fff; transition:transform .1s,opacity .2s;
+  }
+  .btn:hover { transform:translateY(-1px); opacity:.92; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+  .btn-primary { background:linear-gradient(135deg,#667eea,#764ba2); }
+  .btn-download { background:linear-gradient(135deg,#43e97b,#38f9d7); color:#0a5c34; }
+  .btn-mode { background:linear-gradient(135deg,#4facfe,#00f2fe); color:#053b4a; }
+  .btn-clear {
+    padding:9px 14px; font-size:13px; font-weight:normal;
+    background:#f0f0f7; color:#555; border:1px solid #e0e0ea;
+  }
+  .status { font-size:13px; color:#666; margin-bottom:12px; min-height:20px; }
+  .stats { font-size:13px; color:#888; margin-bottom:10px; }
+  .stats b { color:#667eea; }
+
+  /* 中文模式表格 */
+  .wrap { max-height:520px; overflow:auto; border-radius:10px; border:1px solid #eee; display:none; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border:1px solid #eee; padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#f4f5ff; color:#555; position:sticky; top:0; z-index:1; }
+  tr:nth-child(even) { background:#fafaff; }
+  .word { font-weight:bold; color:#4a3f8f; }
+  .ph { color:#999; font-style:italic; }
+  .tag {
+    display:inline-block; background:#fff3e0; color:#b26a00;
+    border-radius:4px; padding:1px 6px; font-size:11px; white-space:nowrap;
+  }
+  .notfound { color:#d32f2f; }
+
+  /* 英英模式：剑桥风格词条 */
+  #enList { display:none; max-height:560px; overflow:auto; padding:2px; }
+  .entry {
+    border-left:3px solid var(--brand1); background:#fbfbff;
+    border-radius:8px; padding:12px 16px; margin-bottom:10px;
+  }
+  .entry-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .entry-word { font-size:19px; font-weight:700; color:#3b2f8f; letter-spacing:.2px; }
+  .entry-ph { color:#999; font-style:italic; font-size:13px; }
+  .pos-label {
+    display:inline-block; margin-top:8px; font-size:12px; font-style:italic;
+    color:#764ba2; text-transform:lowercase;
+  }
+  .senses { margin:4px 0 2px 20px; }
+  .senses li { margin:3px 0; line-height:1.6; color:#333; font-size:13.5px; }
+  .hint { color:#aaa; font-size:12px; margin-top:6px; }
+
+  /* 搜索栏 */
+  .searchbar {
+    display:none; gap:10px; align-items:center; margin-top:14px;
+    padding-top:14px; border-top:1px dashed #e5e5f0;
+  }
+  .searchbar input {
+    flex:1; padding:10px 12px; border:2px solid #e0e0e0; border-radius:10px;
+    font-size:14px; outline:none; transition:border-color .2s;
+  }
+  .searchbar input:focus { border-color:var(--brand1); }
+  .searchbar .count { font-size:12px; color:var(--muted); white-space:nowrap; }
+  mark { background:#fff3a8; padding:0 1px; border-radius:2px; }
+  .back-link { display:inline-block; margin-bottom:12px; color:#667eea; text-decoration:none; font-size:14px; }
+  .back-link:hover { text-decoration:underline; }
+  .footer { margin-top:18px; text-align:center; color:#aaa; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <a class="back-link" href="/">← 返回教材问答</a>
+  <h1>📖 英文单词提取背词表工具</h1>
+  <div class="sub">粘贴英文文章 → 提取单词（去重排序 + 查词典）→ 预览 → 下载 Word 背词表<br>
+    支持「中文释义（四六级）」与「英英释义（剑桥风格）」两种模式，可随时切换。</div>
+
+  <textarea id="article" placeholder="在这里粘贴英文文章，例如：
+The sun rises over the quiet village. Every morning, the farmers walk to their fields...
+(支持多段、多行，自动识别 don't / I'm 这类缩写词)"></textarea>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="btnExtract" onclick="extract()">🔍 提取单词并预览</button>
+    <button class="btn btn-mode" id="btnMode" onclick="toggleMode()">🌐 释义：中文（四六级）</button>
+    <button class="btn btn-download" id="btnDownload" onclick="downloadDocx()" disabled>📄 下载 Word 背词表</button>
+  </div>
+
+  <div class="status" id="status">👋 请粘贴文章后点击「提取单词并预览」</div>
+  <div class="stats" id="stats" style="display:none"></div>
+
+  <!-- 中文模式 -->
+  <div class="wrap" id="cnWrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:44px">序号</th>
+          <th style="width:140px">单词</th>
+          <th style="width:150px">音标</th>
+          <th>中文释义</th>
+          <th style="width:120px">标签</th>
+        </tr>
+      </thead>
+      <tbody id="cnBody"></tbody>
+    </table>
+  </div>
+
+  <!-- 英英模式 -->
+  <div id="enList"></div>
+
+  <!-- 搜索栏 -->
+  <div class="searchbar" id="searchBar">
+    <input id="q" placeholder="🔎 输入字母筛选单词（精确优先，无结果自动模糊）" autocomplete="off">
+    <span class="count" id="qstat"></span>
+    <button class="btn btn-clear" id="qclear" onclick="clearQuery()">清空</button>
+  </div>
+
+  <div class="footer">本地运行 · ECDICT 英汉词典（340 万词条）· 数据不出本机</div>
+</div>
+
+<script>
+let currentWords = [];
+let mode = 'cn';   // cn = 中文（四六级），en = 英英（剑桥风格）
+let query = '';
+
+function $(id) { return document.getElementById(id); }
+
+/* ==================== 提取 ==================== */
+async function extract() {
+  const article = $('article').value.trim();
+  if (!article) { setStatus('⚠️ 请先粘贴英文文章！', '#d32f2f'); return; }
+
+  setStatus('⏳ 正在提取单词、查询词典...', '#666');
+  $('btnExtract').disabled = true;
+
+  try {
+    const resp = await fetch('/api/vocab/extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=UTF-8'},
+      body: JSON.stringify({article: article})
+    });
+    const data = await resp.json();
+    if (data.error) { setStatus('❌ ' + data.error, '#d32f2f'); return; }
+
+    currentWords = data.words;
+    query = '';
+    $('q').value = '';
+    $('btnDownload').disabled = false;
+    render();
+    setStatus('✅ 提取完成！共 ' + data.total + ' 个单词' +
+              (data.notFound > 0 ? '，其中 ' + data.notFound + ' 个未收录' : ''), '#2e7d32');
+    $('stats').innerHTML = '📊 共 <b>' + data.total + '</b> 个单词 · 未收录 <b>' + data.notFound + '</b> 个';
+    $('stats').style.display = 'block';
+  } catch (e) {
+    setStatus('❌ 请求失败: ' + e.message, '#d32f2f');
+  } finally {
+    $('btnExtract').disabled = false;
+  }
+}
+
+/* ==================== 渲染 ==================== */
+function render() {
+  updateModeBtn();
+  const res = visibleWords();
+  if (mode === 'cn') renderCn(res.rows); else renderEn(res.rows);
+  $('cnWrap').style.display = (mode === 'cn' && currentWords.length) ? 'block' : 'none';
+  $('enList').style.display = (mode === 'en' && currentWords.length) ? 'block' : 'none';
+  $('searchBar').style.display = currentWords.length ? 'flex' : 'none';
+  $('stats').style.display = currentWords.length ? 'block' : 'none';
+
+  const total = currentWords.length;
+  if (!query.trim()) {
+    $('qstat').textContent = '共 ' + total + ' 个';
+  } else {
+    $('qstat').textContent = res.kind + '匹配 ' + res.rows.length + ' / ' + total;
+  }
+}
+
+function renderCn(rows) {
+  const tbody = $('cnBody');
+  tbody.innerHTML = '';
+  rows.forEach((w, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + (i + 1) + '</td>' +
+      '<td class="word">' + hl(w.w) + '</td>' +
+      '<td class="ph">' + (w.ph ? '/' + esc(w.ph) + '/' : '') + '</td>' +
+      '<td>' + esc(w.cn) + '</td>' +
+      '<td>' + (w.tag ? '<span class="tag">' + esc(w.tag) + '</span>' : '') + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function renderEn(rows) {
+  const list = $('enList');
+  list.innerHTML = '';
+  rows.forEach(w => {
+    const div = document.createElement('div');
+    div.className = 'entry';
+    let h = '<div class="entry-head">' +
+            '<span class="entry-word">' + hl(w.w) + '</span>' +
+            (w.ph ? '<span class="entry-ph">/' + esc(w.ph) + '/</span>' : '') +
+            (w.tag ? '<span class="tag">' + esc(w.tag) + '</span>' : '') +
+            '</div>';
+    h += renderDefs(w.en, w.pos);
+    div.innerHTML = h;
+    list.appendChild(div);
+  });
+}
+
+/* 剑桥风格：按词性分组 + 编号 */
+function renderDefs(en, posField) {
+  const groups = parseDefs(en, posField);
+  if (!groups.length) return '<div class="hint">（无英文释义）</div>';
+  let h = '';
+  groups.forEach(g => {
+    if (g.pos) h += '<div class="pos-label">' + esc(g.pos) + '</div>';
+    h += '<ol class="senses">';
+    g.items.forEach(t => { h += '<li>' + esc(t) + '</li>'; });
+    h += '</ol>';
+  });
+  return h;
+}
+
+function parseDefs(en, posField) {
+  const text = String(en || '').trim();
+  if (!text) return [];
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const groups = [];
+  let cur = null;
+  const re = /^(ad|n|v|s|a|r|j|p|c|i|m|u|t|x)\.?\s+(.*)$/i;
+  lines.forEach(line => {
+    const m = line.match(re);
+    let code = '', body = line;
+    if (m) { code = m[1].toLowerCase(); body = m[2]; }
+    if (code) {
+      const pos = posName(code);
+      const last = groups.length ? groups[groups.length - 1] : null;
+      if (last && last.pos === pos) {
+        last.items.push(body);
+      } else {
+        groups.push({pos: pos, items: [body]});
+      }
+      cur = groups[groups.length - 1];
+    } else if (cur) {
+      cur.items.push(body);
+    } else {
+      cur = {pos: posFromField(posField), items: [body]};
+      groups.push(cur);
+    }
+  });
+  return groups;
+}
+
+function posName(code) {
+  const map = {
+    n:'noun', v:'verb', s:'adjective', a:'adjective', j:'adjective',
+    r:'adverb', ad:'adverb', p:'preposition', c:'conjunction',
+    i:'interjection', m:'numeral', u:'auxiliary verb', t:'particle'
+  };
+  return map[String(code).toLowerCase()] || '';
+}
+
+function posFromField(posField) {
+  const s = String(posField || '').trim();
+  if (!s) return '';
+  const first = s.split('/')[0];
+  const code = first.split(':')[0];
+  return posName(code);
+}
+
+/* ==================== 搜索 ==================== */
+function visibleWords() {
+  const q = query.trim().toLowerCase();
+  if (!q) return {rows: currentWords, kind: ''};
+  const exact = currentWords.filter(w => w.w.toLowerCase() === q);
+  if (exact.length) return {rows: exact, kind: '精确'};
+  return {rows: currentWords.filter(w => w.w.toLowerCase().includes(q)), kind: '模糊'};
+}
+
+function clearQuery() {
+  query = '';
+  $('q').value = '';
+  render();
+  $('q').focus();
+}
+
+/* ==================== 模式切换 ==================== */
+function toggleMode() {
+  mode = (mode === 'cn') ? 'en' : 'cn';
+  render();
+}
+
+function updateModeBtn() {
+  $('btnMode').textContent = (mode === 'cn') ? '🌐 释义：中文（四六级）' : '🌐 释义：英英（剑桥风格）';
+}
+
+/* ==================== 下载 ==================== */
+async function downloadDocx() {
+  const article = $('article').value.trim();
+  if (!article) { setStatus('⚠️ 请先粘贴英文文章！', '#d32f2f'); return; }
+  setStatus('⏳ 正在生成 Word 文档...', '#666');
+  $('btnDownload').disabled = true;
+  try {
+    const resp = await fetch('/api/vocab/docx', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json; charset=UTF-8'},
+      body: JSON.stringify({article: article, mode: mode})
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      setStatus('❌ ' + (err.error || '生成失败'), '#d32f2f');
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = (mode === 'en') ? '单词背诵表_英英.docx' : '单词背诵表_中文.docx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus('✅ 下载已开始！浏览器底部/下载列表里可以找到 Word 文件', '#2e7d32');
+  } catch (e) {
+    setStatus('❌ 生成失败: ' + e.message, '#d32f2f');
+  } finally {
+    $('btnDownload').disabled = false;
+  }
+}
+
+/* ==================== 工具 ==================== */
+function hl(word) {
+  const s = esc(word);
+  const q = query.trim();
+  if (!q) return s;
+  const i = s.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return s;
+  return s.slice(0, i) + '<mark>' + s.slice(i, i + q.length) + '</mark>' + s.slice(i + q.length);
+}
+
+function setStatus(msg, color) {
+  const el = $('status');
+  el.innerHTML = msg;
+  el.style.color = color;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* 搜索框实时过滤 */
+document.addEventListener('DOMContentLoaded', function () {
+  $('q').addEventListener('input', function (e) {
+    query = e.target.value;
+    render();
+  });
+  $('q').addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') clearQuery();
+  });
+});
+</script>
+</body>
+</html>

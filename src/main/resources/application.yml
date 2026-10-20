@@ -31,6 +31,13 @@ server:
 fa:
   debug: false
 
+  # ---- 背词工具(词典外置,不打包进 jar)----
+  # dict-path: ECDICT 的 stardict.db 路径;默认项目下 dict/stardict.db
+  # max-words: 单篇文章最多提取多少个单词,防止粘贴整本书
+  vocab:
+    dict-path: ${FA_VOCAB_DICT:dict/stardict.db}
+    max-words: ${FA_VOCAB_MAX_WORDS:5000}
+
   # ---- 调用 LLM 的通用参数(超时 / 重试)----
   llm:
     request-timeout-seconds: 120

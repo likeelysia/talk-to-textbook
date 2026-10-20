@@ -207,6 +207,9 @@ button:disabled { opacity: .5; cursor: default; }
 /* ---------------- 联系开发者 ---------------- */
 
 .contact-cta p { margin: 0; font-size: 14px; }
+.contact-cta p.vocab-cta { margin-top: 10px; }
+.vocab-btn { margin-left: 0; background: #2e7d32; }
+.vocab-btn:hover { background: #1b5e20; }
 .contact-btn {
     display: inline-block; margin-left: 6px; padding: 8px 14px;
     background: var(--brand); color: #fff; border-radius: 10px;
