@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.memory;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -24,6 +25,11 @@ import java.util.UUID;
  *   <li>{@code lastAccessAt} = <b>最后一次被召回是什么时候</b>(淘汰时按"最久没用"先走)。</li>
  * </ul>
  *
+ * <p><b>status / supersedes(对账)</b>:新记忆和旧记忆冲突时,不是直接改旧的那条,
+ * 而是新建一条、把旧条标成 {@code superseded}(软覆盖,历史还在),并用 {@code supersedes}
+ * 记下"我覆盖了哪些旧 id";用户明确说忘掉时标 {@code deleted}(软删)。
+ * 召回和界面默认只认 {@code active}。
+ *
  * <p><b>⚠️ 命名陷阱(踩过):</b>这里的方法叫 {@code hasEmbedding()} / {@code fromUser()},
  * 而不是 {@code isEmbedding()} / {@code isUserOrigin()}
  * —— Jackson 只把 {@code getXxx()} / {@code isXxx()} 形式的无参方法当成 JSON 属性,
@@ -38,7 +44,10 @@ public record MemoryEntry(
         long lastAccessAt,
         boolean pinned,
         String origin,
-        float[] embedding) {
+        float[] embedding,
+        long updatedAt,
+        String status,
+        List<String> supersedes) {
 
     /** 单条记忆最多留几个字:模型不听话写小作文时兜一下,免得把上下文预算吃掉。 */
     public static final int TEXT_MAX = 200;
@@ -49,31 +58,61 @@ public record MemoryEntry(
     /** 来源:助手在后台从对话里提炼出来的。 */
     public static final String ORIGIN_AUTO = "auto";
 
+    /** 正常可用。 */
+    public static final String STATUS_ACTIVE = "active";
+
+    /** 被新版本覆盖(软覆盖:历史还在,只是不再召回)。 */
+    public static final String STATUS_SUPERSEDED = "superseded";
+
+    /** 用户明确要求忘掉(软删:历史还在,只是不再召回)。 */
+    public static final String STATUS_DELETED = "deleted";
+
     public MemoryEntry {
         text = normalize(text);
         origin = (origin == null || origin.isBlank()) ? ORIGIN_AUTO : origin;
         createdAt = createdAt <= 0 ? System.currentTimeMillis() : createdAt;
         // 老文件(加这个字段之前写的)没有 lastAccessAt → 拿创建时间顶上,别让它变成"1970 年用过"
         lastAccessAt = lastAccessAt <= 0 ? createdAt : lastAccessAt;
+        updatedAt = updatedAt <= 0 ? createdAt : updatedAt;
+        status = (status == null || status.isBlank()) ? STATUS_ACTIVE : status;
+        supersedes = supersedes == null ? List.of() : List.copyOf(supersedes);
         embedding = (embedding == null || embedding.length == 0) ? null : embedding.clone();
     }
 
     /** 新造一条记忆(id 自动生成,时间取现在,来源 = 自动提炼)。 */
     public static MemoryEntry of(String scopeId, String text, String conversationId, float[] embedding) {
         return new MemoryEntry(newId(), scopeId, text, conversationId,
-                System.currentTimeMillis(), 0L, false, ORIGIN_AUTO, embedding);
+                System.currentTimeMillis(), 0L, false, ORIGIN_AUTO, embedding,
+                0L, STATUS_ACTIVE, List.of());
     }
 
     /** 用户自己加 / 明确要求记住的一条:直接钉住,永不淘汰。 */
     public static MemoryEntry user(String scopeId, String text, String conversationId, float[] embedding) {
         return new MemoryEntry(newId(), scopeId, text, conversationId,
-                System.currentTimeMillis(), 0L, true, ORIGIN_USER, embedding);
+                System.currentTimeMillis(), 0L, true, ORIGIN_USER, embedding,
+                0L, STATUS_ACTIVE, List.of());
     }
 
     /** 指定 id / 时间去造一条(测试用:写死时间才好断言"谁先谁后")。 */
     public static MemoryEntry at(String id, String scopeId, String text, String conversationId,
                                  long createdAt, float[] embedding) {
-        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, createdAt, false, ORIGIN_AUTO, embedding);
+        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, createdAt, false, ORIGIN_AUTO,
+                embedding, createdAt, STATUS_ACTIVE, List.of());
+    }
+
+    /**
+     * 造一条"覆盖旧记忆"的新记忆。
+     *
+     * <p>旧条不删,由调用方标 {@code superseded};新条记住 {@code supersedes = 旧条 (及旧条覆盖过的更早版本)}。
+     * 钉住状态、来源跟着旧条走 —— 这是"同一件事",不是新冒出来的一件事。
+     */
+    public static MemoryEntry superseding(MemoryEntry old, String newText, String conversationId,
+                                          float[] embedding) {
+        List<String> replaced = new java.util.ArrayList<>(old.supersedes);
+        replaced.add(old.id);
+        return new MemoryEntry(newId(), old.scopeId, newText, conversationId,
+                System.currentTimeMillis(), 0L, old.pinned, old.origin, embedding,
+                0L, STATUS_ACTIVE, replaced);
     }
 
     /**
@@ -83,24 +122,46 @@ public record MemoryEntry(
      */
     public MemoryEntry withText(String newText, float[] newEmbedding) {
         return new MemoryEntry(id, scopeId, newText, conversationId, createdAt, lastAccessAt, pinned, origin,
-                newEmbedding);
+                newEmbedding, System.currentTimeMillis(), status, supersedes);
     }
 
     /** 用户在界面上改了一条(改文字 / 钉住 / 取消钉住)。 */
     public MemoryEntry edited(String newText, boolean newPinned, float[] newEmbedding) {
         return new MemoryEntry(id, scopeId, newText, conversationId, createdAt, lastAccessAt, newPinned, origin,
-                newEmbedding);
+                newEmbedding, System.currentTimeMillis(), STATUS_ACTIVE, supersedes);
     }
 
     /** 钉住 / 取消钉住。 */
     public MemoryEntry withPinned(boolean newPinned) {
         return new MemoryEntry(id, scopeId, text, conversationId, createdAt, lastAccessAt, newPinned, origin,
-                embedding);
+                embedding, System.currentTimeMillis(), status, supersedes);
     }
 
     /** 记一下"这条刚被召回过"(淘汰时按"最久没用"先走)。 */
     public MemoryEntry withAccess(long when) {
-        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, when, pinned, origin, embedding);
+        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, when, pinned, origin, embedding,
+                updatedAt, status, supersedes);
+    }
+
+    /** 改状态(软覆盖 / 软删)。 */
+    public MemoryEntry withStatus(String newStatus) {
+        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, lastAccessAt, pinned, origin,
+                embedding, System.currentTimeMillis(), newStatus, supersedes);
+    }
+
+    /** 被新版本覆盖。 */
+    public MemoryEntry superseded() {
+        return withStatus(STATUS_SUPERSEDED);
+    }
+
+    /** 用户要求忘掉(软删)。 */
+    public MemoryEntry deleted() {
+        return withStatus(STATUS_DELETED);
+    }
+
+    /** 还能不能被召回 / 显示。 */
+    public boolean active() {
+        return STATUS_ACTIVE.equals(status);
     }
 
     /** 有没有向量(没有 = 召回时只能按时间排,不能按相似度排)。 */

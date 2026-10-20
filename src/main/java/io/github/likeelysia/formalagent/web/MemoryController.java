@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.web;
 
+import io.github.likeelysia.formalagent.memory.CoreMemoryStore;
 import io.github.likeelysia.formalagent.memory.LongTermMemory;
 import io.github.likeelysia.formalagent.memory.MemoryEntry;
 import java.util.LinkedHashMap;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -40,14 +42,36 @@ import org.springframework.web.bind.annotation.RestController;
 public class MemoryController {
 
     private final LongTermMemory memory;
+    private final CoreMemoryStore coreMemory;
 
-    public MemoryController(LongTermMemory memory) {
+    public MemoryController(LongTermMemory memory, CoreMemoryStore coreMemory) {
         this.memory = memory;
+        this.coreMemory = coreMemory;
     }
 
     @GetMapping("/memory")
-    public Map<String, Object> list(@RequestParam(required = false) String conversationId) {
-        return body(memory.list(conversationId));
+    public Map<String, Object> list(@RequestParam(required = false) String conversationId,
+                                    @RequestParam(defaultValue = "false") boolean includeInactive) {
+        return body(memory.list(conversationId, includeInactive));
+    }
+
+    /** 核心档案(全局一份,每轮注入)。 */
+    @GetMapping("/memory/core")
+    public Map<String, Object> core() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("text", coreMemory.read());
+        body.put("maxChars", coreMemory.maxChars());
+        return body;
+    }
+
+    /** 保存核心档案:{"text":"..."}。 */
+    @PutMapping("/memory/core")
+    public Map<String, Object> saveCore(@RequestBody(required = false) CoreRequest req) {
+        String text = coreMemory.save(req == null ? "" : req.text());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("text", text);
+        body.put("maxChars", coreMemory.maxChars());
+        return body;
     }
 
     @PostMapping("/memory")
@@ -89,7 +113,7 @@ public class MemoryController {
     public ResponseEntity<Map<String, Object>> export(@RequestParam(required = false) String conversationId) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"long-term-memory.json\"")
-                .body(body(memory.list(conversationId)));
+                .body(body(memory.list(conversationId, true)));
     }
 
     private static Map<String, Object> body(List<MemoryEntry> entries) {
@@ -107,13 +131,19 @@ public class MemoryController {
     public record EditRequest(String conversationId, String text, Boolean pinned) {
     }
 
+    /** 保存核心档案:{"text":"..."}。 */
+    public record CoreRequest(String text) {
+    }
+
     /** 出口视图(**故意不带 embedding**):一条记忆能给人看的就这些。 */
     public record MemoryView(String id, String text, boolean pinned, String origin, long createdAt,
-                             long lastAccessAt, String conversationId) {
+                             long lastAccessAt, String conversationId, String status,
+                             long updatedAt, List<String> supersedes) {
 
         static MemoryView of(MemoryEntry entry) {
             return new MemoryView(entry.id(), entry.text(), entry.pinned(), entry.origin(),
-                    entry.createdAt(), entry.lastAccessAt(), entry.conversationId());
+                    entry.createdAt(), entry.lastAccessAt(), entry.conversationId(),
+                    entry.status(), entry.updatedAt(), entry.supersedes());
         }
     }
 }

@@ -295,6 +295,25 @@ body.contact-page {
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .modal-head h2 { margin: 0; font-size: 16px; }
 .mem-tip { margin: 0; line-height: 1.5; }
+/* 核心档案(每轮必带的小抄) */
+.mem-core {
+    display: flex; flex-direction: column; gap: 6px; padding: 10px;
+    border: 1px solid var(--line); border-radius: 10px; background: #f7fbff;
+}
+.mem-core-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mem-core textarea {
+    width: 100%; min-height: 90px; resize: vertical; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff;
+    font-family: inherit; font-size: 13px; line-height: 1.5; outline: none;
+}
+.mem-core textarea:focus { border-color: var(--brand); }
+.mem-core-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mem-history { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.mem-item.inactive { opacity: .6; background: #f6f6f8; }
+.mem-status {
+    font-size: 11px; padding: 1px 6px; border-radius: 5px;
+    background: #eee; color: #777; white-space: nowrap;
+}
 /* 记忆域(共享/独立)—— 一行下拉 + 一句解释 */
 .mem-scope { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .mem-scope select {

@@ -950,10 +950,44 @@ const memExportBtn = document.getElementById('memExport');
 const memForgetBtn = document.getElementById('memForgetAll');
 const memScopeEl = document.getElementById('memScope');
 const memScopeHintEl = document.getElementById('memScopeHint');
+const coreTextEl = document.getElementById('coreText');
+const coreCountEl = document.getElementById('coreCount');
+const coreSaveBtn = document.getElementById('coreSave');
+const memHistoryEl = document.getElementById('memHistory');
 
 /** 记忆接口都要带上“当前会话”(后端按它找记忆域)。 */
 function memQuery() {
-    return 'conversationId=' + encodeURIComponent(currentConversationId || '');
+    let q = 'conversationId=' + encodeURIComponent(currentConversationId || '');
+    if (memHistoryEl && memHistoryEl.checked) {
+        q += '&includeInactive=true';
+    }
+    return q;
+}
+
+/** 核心档案:全局一份,每轮注入。 */
+async function loadCoreMemory() {
+    try {
+        const data = await apiJson('/api/memory/core');
+        coreTextEl.value = data.text || '';
+        coreCountEl.textContent = `${(data.text || '').length} / ${data.maxChars}`;
+    } catch (e) {
+        coreCountEl.textContent = '读不出来:' + e.message;
+    }
+}
+
+async function saveCoreMemory() {
+    const text = coreTextEl.value.trim();
+    try {
+        const data = await apiJson('/api/memory/core', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        coreTextEl.value = data.text || '';
+        coreCountEl.textContent = `${(data.text || '').length} / ${data.maxChars}`;
+    } catch (e) {
+        window.alert('没保存:' + e.message);
+    }
 }
 
 function formatTime(ms) {
@@ -983,18 +1017,29 @@ function renderMemories(list) {
         const row = document.createElement('div');
         row.className = 'mem-item';
 
+        // 记忆正文是用户/模型产出的自由文本 —— 一律 textContent,绝不当 HTML 解析(XSS)
+        const text = document.createElement('span');
+        text.className = 'mem-text';
+        text.textContent = m.text;
+        text.title = `${m.origin === 'user' ? '你亲手记的' : '助手提炼的'} · ${formatTime(m.createdAt)}`;
+
+        const active = !m.status || m.status === 'active';
+        if (!active) {
+            row.classList.add('inactive');
+            const badge = document.createElement('span');
+            badge.className = 'mem-status';
+            badge.textContent = m.status === 'deleted' ? '已删除' : '已覆盖';
+            row.append(text, badge);
+            memListEl.appendChild(row);
+            return;
+        }
+
         const pin = document.createElement('button');
         pin.type = 'button';
         pin.className = 'mini' + (m.pinned ? ' pinned' : '');
         pin.textContent = m.pinned ? '📌' : '📍';
         pin.title = m.pinned ? '已钉住(不会被自动清理)—— 点一下取消' : '点一下钉住(不会被自动清理)';
         pin.addEventListener('click', () => togglePin(m));
-
-        // 记忆正文是用户/模型产出的自由文本 —— 一律 textContent,绝不当 HTML 解析(XSS)
-        const text = document.createElement('span');
-        text.className = 'mem-text';
-        text.textContent = m.text;
-        text.title = `${m.origin === 'user' ? '你亲手记的' : '助手提炼的'} · ${formatTime(m.createdAt)}`;
 
         const edit = document.createElement('button');
         edit.type = 'button';
@@ -1152,6 +1197,7 @@ function openMemory() {
     memTextEl.focus();
     loadMemories();
     loadMemoryScope();
+    loadCoreMemory();
 }
 
 function closeMemory() {
@@ -1159,8 +1205,14 @@ function closeMemory() {
 }
 
 openMemoryBtn.addEventListener('click', openMemory);
+// 深链接:/#memory 直接打开记忆抽屉(方便截图/收藏)
+if (location.hash === '#memory') {
+    setTimeout(openMemory, 300);
+}
 closeMemoryBtn.addEventListener('click', closeMemory);
 memAddBtn.addEventListener('click', addMemory);
+coreSaveBtn.addEventListener('click', saveCoreMemory);
+memHistoryEl.addEventListener('change', loadMemories);
 memTextEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addMemory(); }
 });

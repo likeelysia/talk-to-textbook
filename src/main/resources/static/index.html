@@ -82,6 +82,17 @@
         <p class="mem-tip muted small">
             助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标了 📌 的不会被自动清理(满了先淘汰最久没用到的那条)。
         </p>
+        <div class="mem-core">
+            <div class="mem-core-head">
+                <strong>📌 核心档案</strong>
+                <span class="muted small">每轮都带(约 300–500 token)</span>
+            </div>
+            <textarea id="coreText" rows="6" placeholder="我是谁 / 长期目标 / 当前项目 / 沟通偏好...&#10;例如:我叫鹏哥,在准备 Java 实习面试;回答要给出处;习惯国际单位制。"></textarea>
+            <div class="mem-core-foot">
+                <span id="coreCount" class="muted small"></span>
+                <button id="coreSave" type="button" class="mini">保存核心档案</button>
+            </div>
+        </div>
         <div class="mem-scope">
             <label for="memScope">🔗 记忆域:</label>
             <select id="memScope"></select>
@@ -91,6 +102,7 @@
             <input id="memText" type="text" placeholder="手动记住一件事,例如:我叫鹏哥,在准备 Java 实习面试" autocomplete="off">
             <button id="memAdd" type="button">记住</button>
         </div>
+        <label class="mem-history"><input type="checkbox" id="memHistory"> 显示历史(已覆盖 / 已删除)</label>
         <div id="memList" class="mem-list">加载中…</div>
         <div class="mem-foot">
             <button id="memExport" type="button" class="mini">导出 JSON</button>

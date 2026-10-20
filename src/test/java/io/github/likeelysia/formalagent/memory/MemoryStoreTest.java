@@ -124,7 +124,7 @@ class MemoryStoreTest {
         root.get("entries").get(0).fieldNames().forEachRemaining(fields::add);
         assertThat(fields).containsExactlyInAnyOrder(
                 "id", "scopeId", "text", "conversationId", "createdAt", "lastAccessAt",
-                "pinned", "origin", "embedding");
+                "pinned", "origin", "embedding", "updatedAt", "status", "supersedes");
     }
 
     @Test

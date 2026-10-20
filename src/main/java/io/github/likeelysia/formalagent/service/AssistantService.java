@@ -6,12 +6,14 @@ import io.github.likeelysia.formalagent.agent.StreamSink;
 import io.github.likeelysia.formalagent.conversation.Conversation;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
+import io.github.likeelysia.formalagent.memory.CoreMemoryStore;
 import io.github.likeelysia.formalagent.memory.LongTermMemory;
 import io.github.likeelysia.formalagent.memory.ShortTermMemory;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -37,13 +39,23 @@ public class AssistantService {
     private final ConversationService conversations;
     private final ShortTermMemory shortTerm;
     private final LongTermMemory longTerm;
+    private final CoreMemoryStore coreMemory;
 
+    @Autowired
     public AssistantService(AgentService agent, ConversationService conversations,
-                            ShortTermMemory shortTerm, LongTermMemory longTerm) {
+                            ShortTermMemory shortTerm, LongTermMemory longTerm,
+                            CoreMemoryStore coreMemory) {
         this.agent = agent;
         this.conversations = conversations;
         this.shortTerm = shortTerm;
         this.longTerm = longTerm;
+        this.coreMemory = coreMemory;
+    }
+
+    /** 测试 / 手工装配用:不带核心档案。 */
+    public AssistantService(AgentService agent, ConversationService conversations,
+                            ShortTermMemory shortTerm, LongTermMemory longTerm) {
+        this(agent, conversations, shortTerm, longTerm, null);
     }
 
     /** 一轮问答的结果:答案 + 这一轮记到了哪个会话。 */
@@ -77,8 +89,16 @@ public class AssistantService {
         String id = conversations.requireExisting(conversationId);
         Conversation conversation = conversations.get(id);
 
-        // 长期记忆:拿“这次的提问”去记忆域里召回(跨会话累积的偏好 / 事实)
+        // 核心档案:每轮都带的小抄(我是谁 / 目标 / 当前项目 / 偏好),排在长期记忆前面
         List<AgentMessage> history = new ArrayList<>();
+        if (coreMemory != null) {
+            AgentMessage core = coreMemory.asMessage();
+            if (core != null) {
+                history.add(core);
+            }
+        }
+
+        // 长期记忆:拿“这次的提问”去记忆域里召回(跨会话累积的偏好 / 事实)
         AgentMessage recalled = longTerm.recallAsMessage(conversation.scopeId(), modelQuestion);
         if (recalled != null) {
             history.add(recalled);

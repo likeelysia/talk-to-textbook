@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -53,6 +54,10 @@ public class LongTermMemory {
     private static final int DEFAULT_RECALL_TOP_K = 5;
     private static final double DEFAULT_DEDUP_SIMILARITY = 0.9;
     private static final int DEFAULT_MAX_STORED = 500;
+    /** 每条候选最多带几条相似旧记忆去对账。 */
+    private static final int RECONCILE_NEIGHBORS = 3;
+    /** 被覆盖/删除的历史最多留多少条(审计用,防止无限增长)。 */
+    private static final int MAX_INACTIVE = 200;
 
     /** 召回时加的一句"说明书":让模型知道这些不是用户刚说的话。 */
     static final String HEAD =
@@ -65,23 +70,33 @@ public class LongTermMemory {
     private final ConversationService conversations;
     private final AppConfig.Memory.LongTerm config;
     private final Executor executor;
+    private final MemoryReconciler reconciler;
 
     @Autowired
     public LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
-                          ConversationService conversations, AppConfig config) {
-        this(store, extractor, embedder, conversations, longTermOf(config), worker());
+                          ConversationService conversations, AppConfig config,
+                          MemoryReconciler reconciler) {
+        this(store, extractor, embedder, conversations, longTermOf(config), worker(), reconciler);
     }
 
     /** 测试 / 手工装配用:传一个"就在当前线程跑"的 Executor,提炼就变成同步的,断言才好写。 */
     public LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                           ConversationService conversations, AppConfig.Memory.LongTerm config,
                           Executor executor) {
+        this(store, extractor, embedder, conversations, config, executor,
+                (candidates, neighbors) -> java.util.Map.of());
+    }
+
+    LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
+                   ConversationService conversations, AppConfig.Memory.LongTerm config,
+                   Executor executor, MemoryReconciler reconciler) {
         this.store = store;
         this.extractor = extractor;
         this.embedder = embedder;
         this.conversations = conversations;
         this.config = config;
         this.executor = executor;
+        this.reconciler = reconciler;
     }
 
     /** 开关(关掉 = 既不提炼也不召回)。 */
@@ -122,7 +137,9 @@ public class LongTermMemory {
         if (!enabled() || scopeId == null || k <= 0) {
             return List.of();
         }
-        List<MemoryEntry> entries = store.list(scopeId);
+        List<MemoryEntry> entries = store.list(scopeId).stream()
+                .filter(MemoryEntry::active)
+                .toList();
         if (entries.isEmpty()) {
             return List.of();
         }
@@ -233,8 +250,9 @@ public class LongTermMemory {
             List<MemoryCandidate> candidates = extractor.extract(pending);
             if (!candidates.isEmpty()) {
                 long[] counts = storeMemories(conversation.scopeId(), candidates, conversation.id());
-                log.info("会话 {} 提炼出 {} 条长期记忆(新增 {} / 合并 {}),记忆域 {}",
-                        conversation.id(), candidates.size(), counts[0], counts[1], conversation.scopeId());
+                log.info("会话 {} 提炼出 {} 条长期记忆(新增 {} / 覆盖 {} / 删除 {}),记忆域 {}",
+                        conversation.id(), candidates.size(), counts[0], counts[1], counts[2],
+                        conversation.scopeId());
             }
         } catch (RuntimeException e) {
             log.warn("长期记忆提炼失败(不影响问答):{}", e.getMessage());
@@ -252,36 +270,140 @@ public class LongTermMemory {
     }
 
     /**
-     * 落盘:先给候选算向量,再"和已有的比一比" —— 像到一定程度就当成同一件事(合并),
-     * 否则新增。
+     * 落盘:先给候选算向量,再拿"相似旧记忆"给对账器决定加/改/删/不动;
+     * 对账器没给决策或给了非法决策时,退回"像到一定程度就合并,否则新增"。
      *
-     * @return {新增条数, 合并条数}
+     * @return {新增条数, 覆盖条数, 删除条数}
      */
     long[] storeMemories(String scopeId, List<MemoryCandidate> candidates, String conversationId) {
         float[][] vectors = tryEmbedAll(candidates.stream().map(MemoryCandidate::text).toList());
-        long[] counts = new long[2];
+
+        // 先拿"已有记忆"给每条候选找 3 条相似记忆,交给对账器决定加/改/删/不动。
+        // 读快照 + 调模型都在锁外做;真正写回时再按 id 找一次,找不到就退回老逻辑。
+        List<MemoryEntry> existing = store.list(scopeId).stream()
+                .filter(MemoryEntry::active)
+                .toList();
+        List<List<MemoryEntry>> neighbors = new ArrayList<>(candidates.size());
+        for (int i = 0; i < candidates.size(); i++) {
+            neighbors.add(nearest(existing, candidates.get(i), vectors[i], RECONCILE_NEIGHBORS));
+        }
+        Map<Integer, MemoryReconciler.Decision> decisions = reconciler.decide(candidates, neighbors);
+
+        long[] counts = new long[3];       // 0=新增 1=覆盖 2=删除
         store.update(scopeId, entries -> {
-            List<MemoryEntry> merged = new ArrayList<>(entries);
+            List<MemoryEntry> next = new ArrayList<>(entries);
             for (int i = 0; i < candidates.size(); i++) {
                 MemoryCandidate candidate = candidates.get(i);
                 float[] vector = vectors[i];
-                int duplicate = indexOfDuplicate(merged, vector);
-                if (duplicate >= 0) {
-                    // 合并:原文换成新的;用户明确要求记住的顺手钉住(又说了一遍 = 再确认一次)
-                    MemoryEntry old = merged.get(duplicate);
-                    merged.set(duplicate, old.withText(candidate.text(), vector)
-                            .withPinned(old.pinned() || candidate.mustRemember()));
-                    counts[1]++;
-                } else {
-                    merged.add(candidate.mustRemember()
-                            ? MemoryEntry.user(scopeId, candidate.text(), conversationId, vector)
-                            : MemoryEntry.of(scopeId, candidate.text(), conversationId, vector));
-                    counts[0]++;
+                MemoryReconciler.Decision decision = decisions.get(i);
+                boolean applied = decision != null
+                        && applyDecision(next, decision, candidate, vector, scopeId, conversationId, counts);
+                if (!applied) {
+                    fallbackStore(next, scopeId, candidate, vector, conversationId, counts);
                 }
             }
-            return trim(scopeId, merged);          // 超上限就淘汰"最久没用"的(钉住的不动)
+            return trim(scopeId, next);          // 超上限就淘汰"最久没用"的(钉住的不动)
         });
         return counts;
+    }
+
+    /** 应用一个对账决策;返回 false = 没应用成功,交给兜底逻辑。 */
+    private boolean applyDecision(List<MemoryEntry> entries, MemoryReconciler.Decision decision,
+                                  MemoryCandidate candidate, float[] vector,
+                                  String scopeId, String conversationId, long[] counts) {
+        String op = decision.op() == null ? "" : decision.op().toUpperCase(java.util.Locale.ROOT);
+        switch (op) {
+            case MemoryReconciler.ADD -> {
+                entries.add(entryFor(scopeId, candidate, conversationId, vector));
+                counts[0]++;
+                return true;
+            }
+            case MemoryReconciler.NOOP -> {
+                return true;
+            }
+            case MemoryReconciler.UPDATE -> {
+                int index = indexOfActive(entries, decision.targetId());
+                if (index < 0) {
+                    return false;
+                }
+                MemoryEntry old = entries.get(index);
+                entries.set(index, old.superseded());          // 旧条留着,只是不再召回
+                entries.add(MemoryEntry.superseding(old, decision.text(), conversationId, vector));
+                counts[1]++;
+                return true;
+            }
+            case MemoryReconciler.DELETE -> {
+                int index = indexOfActive(entries, decision.targetId());
+                if (index < 0) {
+                    return false;
+                }
+                MemoryEntry old = entries.get(index);
+                if (old.pinned()) {
+                    log.info("记忆 {} 被钉住,拒绝自动删除", old.id());
+                    return true;                              // 钉住的不自动删,当 NOOP
+                }
+                entries.set(index, old.deleted());
+                counts[2]++;
+                return true;
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
+    /** 对账器没给决策 / 给的不合法时的老逻辑:太像就合并,否则新增。 */
+    private void fallbackStore(List<MemoryEntry> entries, String scopeId, MemoryCandidate candidate,
+                               float[] vector, String conversationId, long[] counts) {
+        int duplicate = indexOfDuplicate(entries, vector);
+        if (duplicate >= 0) {
+            MemoryEntry old = entries.get(duplicate);
+            entries.set(duplicate, old.withText(candidate.text(), vector)
+                    .withPinned(old.pinned() || candidate.mustRemember()));
+            counts[1]++;
+        } else {
+            entries.add(entryFor(scopeId, candidate, conversationId, vector));
+            counts[0]++;
+        }
+    }
+
+    private static MemoryEntry entryFor(String scopeId, MemoryCandidate candidate,
+                                        String conversationId, float[] vector) {
+        return candidate.mustRemember()
+                ? MemoryEntry.user(scopeId, candidate.text(), conversationId, vector)
+                : MemoryEntry.of(scopeId, candidate.text(), conversationId, vector);
+    }
+
+    /** 给一条候选找最相似的 k 条旧记忆(没向量就按字面命中分)。 */
+    private static List<MemoryEntry> nearest(List<MemoryEntry> entries, MemoryCandidate candidate,
+                                             float[] vector, int k) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        java.util.Comparator<MemoryEntry> order;
+        if (vector != null) {
+            order = java.util.Comparator.comparingDouble((MemoryEntry e) -> {
+                float[] existing = e.embedding();
+                return existing == null ? -1 : Vectors.cosine(vector, existing);
+            }).reversed();
+        } else {
+            order = java.util.Comparator.comparingDouble(
+                            (MemoryEntry e) -> keywordScore(candidate.text(), e.text())).reversed()
+                    .thenComparing(java.util.Comparator.comparingLong(MemoryEntry::createdAt).reversed());
+        }
+        return entries.stream().sorted(order).limit(k).toList();
+    }
+
+    private static int indexOfActive(List<MemoryEntry> entries, String id) {
+        if (id == null || id.isBlank()) {
+            return -1;
+        }
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).active() && entries.get(i).id().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private int indexOfDuplicate(List<MemoryEntry> entries, float[] vector) {
@@ -290,6 +412,9 @@ public class LongTermMemory {
         }
         double threshold = dedupSimilarity();
         for (int i = 0; i < entries.size(); i++) {
+            if (!entries.get(i).active()) {
+                continue;                    // 被覆盖/删除的旧版本不参与合并
+            }
             float[] existing = entries.get(i).embedding();
             if (existing != null && Vectors.cosine(vector, existing) > threshold) {
                 return i;
@@ -300,11 +425,18 @@ public class LongTermMemory {
 
     // ==================== 治理:用户自己看 / 改 / 删 ====================
 
-    /** 列出某个会话的记忆域里现有的全部记忆(新的在前)。 */
+    /** 列出某个会话的记忆域里现有的记忆(默认只列 active;新的在前)。 */
     public List<MemoryEntry> list(String conversationId) {
-        List<MemoryEntry> entries = new ArrayList<>(store.list(scopeOf(conversationId)));
-        entries.sort(Comparator.comparingLong((MemoryEntry e) -> e.createdAt()).reversed());
-        return List.copyOf(entries);
+        return list(conversationId, false);
+    }
+
+    /** @param includeInactive true = 连被覆盖/删除的历史一起列出来(界面"显示历史"用) */
+    public List<MemoryEntry> list(String conversationId, boolean includeInactive) {
+        List<MemoryEntry> entries = store.list(scopeOf(conversationId)).stream()
+                .filter(entry -> includeInactive || entry.active())
+                .sorted(Comparator.comparingLong(MemoryEntry::createdAt).reversed())
+                .toList();
+        return entries;
     }
 
     /**
@@ -410,18 +542,33 @@ public class LongTermMemory {
      */
     List<MemoryEntry> trim(String scopeId, List<MemoryEntry> entries) {
         int max = maxStored();
-        if (max <= 0 || entries.size() <= max) {
-            return entries;
+        List<MemoryEntry> active = new ArrayList<>();
+        List<MemoryEntry> inactive = new ArrayList<>();
+        for (MemoryEntry entry : entries) {
+            (entry.active() ? active : inactive).add(entry);
         }
-        List<MemoryEntry> byPriority = new ArrayList<>(entries);
-        byPriority.sort(Comparator.comparing((MemoryEntry e) -> e.pinned())
-                .thenComparingLong((MemoryEntry e) -> e.lastAccessAt())
-                .thenComparingLong((MemoryEntry e) -> e.createdAt()));
-        List<MemoryEntry> kept = new ArrayList<>(byPriority.subList(byPriority.size() - max, byPriority.size()));
-        kept.sort(Comparator.comparingLong((MemoryEntry e) -> e.createdAt()));
-        log.info("记忆域 {} 超过上限({} > {}),淘汰了最久没被用的 {} 条", scopeId, entries.size(), max,
-                entries.size() - max);
-        return kept;
+
+        if (max > 0 && active.size() > max) {
+            active.sort(Comparator.comparing((MemoryEntry e) -> e.pinned())
+                    .thenComparingLong((MemoryEntry e) -> e.lastAccessAt())
+                    .thenComparingLong((MemoryEntry e) -> e.createdAt()));
+            int remove = active.size() - max;
+            active = new ArrayList<>(active.subList(remove, active.size()));
+            log.info("记忆域 {} 超过上限({} > {}),淘汰了最久没被用的 {} 条", scopeId,
+                    active.size() + remove, max, remove);
+        }
+
+        // 历史(被覆盖/删除)只留最近 MAX_INACTIVE 条,防止文件无限长
+        if (inactive.size() > MAX_INACTIVE) {
+            inactive.sort(Comparator.comparingLong(MemoryEntry::updatedAt).reversed());
+            inactive = new ArrayList<>(inactive.subList(0, MAX_INACTIVE));
+        }
+
+        active.sort(Comparator.comparingLong(MemoryEntry::createdAt));
+        List<MemoryEntry> kept = new ArrayList<>(active.size() + inactive.size());
+        kept.addAll(active);
+        kept.addAll(inactive);
+        return List.copyOf(kept);
     }
 
     // ==================== 小工具 ====================

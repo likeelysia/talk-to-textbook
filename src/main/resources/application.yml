@@ -158,6 +158,12 @@ fa:
       max-stored: ${FA_MEMORY_MAX_STORED:500}
       # 一轮对话短于这么多字就不送去提炼(寒暄 / 确认)
       min-chars: ${FA_MEMORY_MIN_CHARS:20}
+      # 记忆对账:true = 新记忆先跟旧记忆比,决定 加/改/删/不动(多一次模型调用)
+      reconcile: ${FA_MEMORY_RECONCILE:true}
+    # 核心档案(全局一份,每轮注入;人话:贴在显示器边上的便签)
+    core:
+      path: ${FA_MEMORY_CORE:data/memory/core.md}
+      max-chars: ${FA_MEMORY_CORE_MAX_CHARS:800}
 
   # ---- 教材切块 / 灌库断点 ----
   extract:

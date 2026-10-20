@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.likeelysia.formalagent.memory.CoreMemoryStore;
 import io.github.likeelysia.formalagent.memory.LongTermMemory;
 import io.github.likeelysia.formalagent.memory.MemoryEntry;
 import java.util.List;
@@ -30,24 +31,27 @@ class MemoryControllerTest {
     @Mock
     private LongTermMemory memory;
 
+    @Mock
+    private CoreMemoryStore coreMemory;
+
     private MemoryController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MemoryController(memory);
+        controller = new MemoryController(memory, coreMemory);
     }
 
     private static MemoryEntry entry() {
         return new MemoryEntry("m1", "default", "用户叫鹏哥", "default", 1000L, 2000L, true,
-                MemoryEntry.ORIGIN_USER, new float[] {1, 2, 3});
+                MemoryEntry.ORIGIN_USER, new float[] {1, 2, 3}, 0L, MemoryEntry.STATUS_ACTIVE, List.of());
     }
 
     @Test
     @DisplayName("列表:回 count + 视图(id / 文字 / 钉住 / 来源都在)")
     void listWrapsViews() {
-        when(memory.list("c1")).thenReturn(List.of(entry()));
+        when(memory.list("c1", false)).thenReturn(List.of(entry()));
 
-        Map<String, Object> body = controller.list("c1");
+        Map<String, Object> body = controller.list("c1", false);
 
         assertThat(body.get("count")).isEqualTo(1);
         @SuppressWarnings("unchecked")
@@ -110,9 +114,33 @@ class MemoryControllerTest {
     }
 
     @Test
+    @DisplayName("核心档案:读文本 + 字数上限")
+    void coreMemoryReads() {
+        when(coreMemory.read()).thenReturn("我叫鹏哥");
+        when(coreMemory.maxChars()).thenReturn(800);
+
+        Map<String, Object> body = controller.core();
+
+        assertThat(body.get("text")).isEqualTo("我叫鹏哥");
+        assertThat(body.get("maxChars")).isEqualTo(800);
+    }
+
+    @Test
+    @DisplayName("核心档案:保存后回显")
+    void coreMemorySaves() {
+        when(coreMemory.save("新档案")).thenReturn("新档案");
+        when(coreMemory.maxChars()).thenReturn(800);
+
+        Map<String, Object> body = controller.saveCore(new MemoryController.CoreRequest("新档案"));
+
+        assertThat(body.get("text")).isEqualTo("新档案");
+        verify(coreMemory).save("新档案");
+    }
+
+    @Test
     @DisplayName("导出:带 Content-Disposition,浏览器当附件下载")
     void exportIsAnAttachment() {
-        when(memory.list("c1")).thenReturn(List.of(entry()));
+        when(memory.list("c1", true)).thenReturn(List.of(entry()));
 
         ResponseEntity<Map<String, Object>> response = controller.export("c1");
 
