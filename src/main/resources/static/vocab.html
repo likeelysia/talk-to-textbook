@@ -24,6 +24,34 @@
     font-family:Consolas,monospace; outline:none; transition:border-color .2s;
   }
   textarea:focus { border-color:var(--brand1); }
+  /* 文本框 + 右上角“清空” */
+  .article-box { position:relative; }
+  .article-box textarea { padding-right:78px; }
+  .clear-text {
+    position:absolute; top:10px; right:10px; padding:5px 11px; font-size:12px;
+    border:1px solid #e0e0ea; border-radius:8px; background:rgba(255,255,255,.94);
+    color:#777; cursor:pointer; transition:.15s;
+  }
+  .clear-text:hover { color:#d32f2f; border-color:#f0b4b4; background:#fff7f7; }
+  /* 确认对话框 */
+  .confirm-mask {
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+    background:rgba(20,20,40,.45);
+  }
+  .confirm-mask[hidden] { display:none; }
+  .confirm-box {
+    width:320px; background:#fff; border-radius:14px; padding:22px 24px;
+    box-shadow:0 12px 40px rgba(0,0,0,.25);
+  }
+  .confirm-box p { margin:0 0 18px; font-size:15px; color:#333; }
+  .confirm-actions { display:flex; justify-content:flex-end; gap:10px; }
+  .confirm-actions button {
+    padding:8px 18px; border-radius:9px; border:1px solid #ddd; background:#fff;
+    color:#555; font-size:14px; cursor:pointer;
+  }
+  .confirm-actions .cancel:hover { background:#f5f5f5; }
+  .confirm-actions .confirm { background:#d32f2f; border-color:#d32f2f; color:#fff; }
+  .confirm-actions .confirm:hover { background:#b71c1c; }
   .btn-row { display:flex; gap:12px; margin:16px 0; flex-wrap:wrap; }
   .btn {
     padding:11px 22px; border:none; border-radius:10px; font-size:15px;
@@ -97,9 +125,12 @@
   <div class="sub">粘贴英文文章 → 提取单词（去重排序 + 查词典）→ 预览 → 下载 Word 背词表<br>
     支持「中文释义（四六级）」与「英英释义（剑桥风格）」两种模式，可随时切换。</div>
 
-  <textarea id="article" placeholder="在这里粘贴英文文章，例如：
+  <div class="article-box">
+    <textarea id="article" placeholder="在这里粘贴英文文章，例如：
 The sun rises over the quiet village. Every morning, the farmers walk to their fields...
 (支持多段、多行，自动识别 don't / I'm 这类缩写词)"></textarea>
+    <button type="button" class="clear-text" id="btnClear" title="清空当前文本">清空</button>
+  </div>
 
   <div class="btn-row">
     <button class="btn btn-primary" id="btnExtract" onclick="extract()">🔍 提取单词并预览</button>
@@ -139,6 +170,17 @@ The sun rises over the quiet village. Every morning, the farmers walk to their f
   <div class="footer">本地运行 · ECDICT 英汉词典（340 万词条）· 数据不出本机</div>
 </div>
 
+<!-- 清空确认对话框 -->
+<div class="confirm-mask" id="clearModal" hidden>
+  <div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="clearTitle">
+    <p id="clearTitle">是否清空文本？</p>
+    <div class="confirm-actions">
+      <button type="button" class="cancel" id="clearCancel">取消</button>
+      <button type="button" class="confirm" id="clearConfirm">确认</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let currentWords = [];
 let mode = 'cn';   // cn = 中文（四六级），en = 英英（剑桥风格）
@@ -146,10 +188,54 @@ let query = '';
 
 function $(id) { return document.getElementById(id); }
 
+/* ==================== 文本保留 / 清空 ==================== */
+const ARTICLE_KEY = 'vocab.article.v1';
+let saveTimer = null;
+
+function saveArticleNow() {
+  try { localStorage.setItem(ARTICLE_KEY, $('article').value); } catch (e) { /* 隐私模式等，忽略 */ }
+}
+
+function scheduleSaveArticle() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveArticleNow, 300);
+}
+
+function restoreArticle() {
+  try {
+    const saved = localStorage.getItem(ARTICLE_KEY);
+    if (saved) $('article').value = saved;
+  } catch (e) { /* 忽略 */ }
+}
+
+function openClearDialog() { $('clearModal').hidden = false; }
+function closeClearDialog() { $('clearModal').hidden = true; }
+
+function clearArticle() {
+  $('article').value = '';
+  try { localStorage.removeItem(ARTICLE_KEY); } catch (e) { /* 忽略 */ }
+  closeClearDialog();
+
+  // 结果是从这段文本来的，文本清掉后一并清掉，避免看到上一篇文章的旧表
+  currentWords = [];
+  query = '';
+  $('q').value = '';
+  $('btnDownload').disabled = true;
+  $('stats').style.display = 'none';
+  $('searchBar').style.display = 'none';
+  $('cnBody').innerHTML = '';
+  $('enList').innerHTML = '';
+  $('cnWrap').style.display = 'none';
+  $('enList').style.display = 'none';
+  setStatus('🧹 文本已清空，可以粘贴新文章了', '#666');
+  $('article').focus();
+}
+
 /* ==================== 提取 ==================== */
 async function extract() {
   const article = $('article').value.trim();
   if (!article) { setStatus('⚠️ 请先粘贴英文文章！', '#d32f2f'); return; }
+  saveArticleNow();
 
   setStatus('⏳ 正在提取单词、查询词典...', '#666');
   $('btnExtract').disabled = true;
@@ -372,8 +458,22 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-/* 搜索框实时过滤 */
+/* 搜索框实时过滤 + 文本保留/清空 */
 document.addEventListener('DOMContentLoaded', function () {
+  restoreArticle();
+  $('article').addEventListener('input', scheduleSaveArticle);
+  window.addEventListener('pagehide', saveArticleNow);
+
+  $('btnClear').addEventListener('click', openClearDialog);
+  $('clearCancel').addEventListener('click', closeClearDialog);
+  $('clearConfirm').addEventListener('click', clearArticle);
+  $('clearModal').addEventListener('click', function (e) {
+    if (e.target === $('clearModal')) closeClearDialog();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('clearModal').hidden) closeClearDialog();
+  });
+
   $('q').addEventListener('input', function (e) {
     query = e.target.value;
     render();
