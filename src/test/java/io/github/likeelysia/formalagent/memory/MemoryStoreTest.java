@@ -74,10 +74,26 @@ class MemoryStoreTest {
     }
 
     @Test
-    @DisplayName("文件坏了不影响聊天:当它没有记忆")
-    void corruptFileIsIgnored() throws IOException {
+    @DisplayName("文件坏了不静默当空:抛异常让上层暴露/降级,绝不覆盖坏文件")
+    void corruptFileIsReported() throws IOException {
         Files.writeString(tmp.resolve("bad.json"), "{ 这不是 JSON");
-        assertThat(store().list("bad")).isEmpty();
+        assertThatThrownBy(() -> store().list("bad"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("损坏");
+    }
+
+    @Test
+    @DisplayName("主文件损坏:从 .bak 恢复,而不是当空表覆盖")
+    void corruptMainRecoversFromBackup() throws IOException {
+        MemoryStore store = store();
+        store.update("scope1", list -> List.of(MemoryEntry.of("scope1", "第一条", "c1", null)));
+        store.update("scope1", list -> List.of(
+                MemoryEntry.of("scope1", "第一条", "c1", null),
+                MemoryEntry.of("scope1", "第二条", "c1", null)));
+
+        Files.writeString(tmp.resolve("scope1.json"), "{ 这不是 JSON");
+
+        assertThat(store.list("scope1")).extracting(MemoryEntry::text).containsExactly("第一条");
     }
 
     @Test
@@ -102,14 +118,15 @@ class MemoryStoreTest {
     }
 
     @Test
-    @DisplayName("delete:整个记忆域清掉(用户说'忘掉'就得真忘掉)")
-    void deleteClearsScope() {
+    @DisplayName("delete:清空条目、保留文件与代次(防旧任务写回)")
+    void deleteClearsScopeAndBumpsGeneration() {
         MemoryStore store = store();
         store.update("scope1", list -> List.of(MemoryEntry.of("scope1", "要忘掉的", "c1", null)));
         store.delete("scope1");
 
         assertThat(store.list("scope1")).isEmpty();
-        assertThat(Files.exists(tmp.resolve("scope1.json"))).isFalse();
+        assertThat(Files.exists(tmp.resolve("scope1.json"))).isTrue();
+        assertThat(store.generation("scope1")).isEqualTo(1);
     }
 
     @Test

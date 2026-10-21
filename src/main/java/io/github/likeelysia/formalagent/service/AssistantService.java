@@ -14,6 +14,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -34,6 +35,17 @@ import org.springframework.stereotype.Component;
 public class AssistantService {
 
     private static final Logger log = LoggerFactory.getLogger(AssistantService.class);
+
+    /**
+     * 统一上下文预算(字符,粗略≈token)。第一版用保守估算:
+     * 中文 1 字≈1~2 token,这里按"1 字 = 1 token"算,宁可早一点截。
+     */
+    @Value("${fa.context.max-chars:14000}")
+    private int maxContextChars = 14000;
+
+    /** 给最终回答预留的空间;预算里先扣掉它。 */
+    @Value("${fa.context.reserve-chars:3000}")
+    private int reserveChars = 3000;
 
     private final AgentService agent;
     private final ConversationService conversations;
@@ -90,19 +102,11 @@ public class AssistantService {
         Conversation conversation = conversations.get(id);
 
         // 核心档案:每轮都带的小抄(我是谁 / 目标 / 当前项目 / 偏好),排在长期记忆前面
-        List<AgentMessage> history = new ArrayList<>();
-        if (coreMemory != null) {
-            AgentMessage core = coreMemory.asMessage();
-            if (core != null) {
-                history.add(core);
-            }
-        }
+        AgentMessage core = coreMemory == null ? null : coreMemory.asMessage();
 
-        // 长期记忆:拿“这次的提问”去记忆域里召回(跨会话累积的偏好 / 事实)
-        AgentMessage recalled = longTerm.recallAsMessage(conversation.scopeId(), modelQuestion);
-        if (recalled != null) {
-            history.add(recalled);
-        }
+        // 长期记忆:统一走 memoryScopeOf 解析到根域 —— 问答与管理接口不能一个读中间指针、一个读根
+        String memoryScope = conversations.memoryScopeOf(id);
+        AgentMessage recalled = longTerm.recallAsMessage(memoryScope, modelQuestion);
 
         // 先把窗口外那几条旧对话并进摘要,再拼上下文。注意是“先压、后用更新过的会话重拼一次” ——
         // 先生成 ctx 再改摘要的话,这一轮模型看到的还是旧 summary,要等到下一轮才生效。
@@ -114,7 +118,10 @@ public class AssistantService {
             context = shortTerm.build(updated);      // 拿更新过的会话重拼一次,这一轮就带上新摘要
             log.info("会话 {} 的滚动摘要已更新(并进 {} 条旧消息)", id, evicted);
         }
-        history.addAll(context.messages());
+
+        // 所有层放进同一个预算:核心档案 > 长期记忆 > 摘要 > 最近几轮;超了先丢低相关/最旧的
+        List<AgentMessage> history = assembleWithinBudget(core, recalled, context.messages(),
+                modelQuestion == null ? 0 : modelQuestion.length());
 
         AgentResult result = (sink == null)
                 ? agent.run(modelQuestion, history)
@@ -122,5 +129,83 @@ public class AssistantService {
         Conversation recorded = conversations.record(id, displayQuestion, result.answer(), result.trace());
         longTerm.maybeExtract(recorded);          // 攒够几轮就在后台提炼一次(不占用户等答案的时间)
         return new Turn(result, id);
+    }
+
+    /**
+     * 把所有层塞进同一个预算:核心档案 → 长期记忆 → 摘要 → 最近几轮。
+     *
+     * <p>顺序就是优先级:预算不够时先不注入长期记忆,再丢摘要,最后从最旧的轮次开始丢;
+     * 当前提问单独占预算、永远保留。第一版按字符估算(偏保守),不是精确 token 计数。
+     */
+    private List<AgentMessage> assembleWithinBudget(AgentMessage core, AgentMessage recalled,
+                                                    List<AgentMessage> contextMessages, int questionChars) {
+        int limit = Math.max(800, maxContextChars - reserveChars - Math.max(0, questionChars));
+        List<AgentMessage> out = new ArrayList<>();
+        int used = 0;
+
+        if (core != null) {
+            out.add(core);
+            used += length(core);
+        }
+        if (recalled != null) {
+            if (used + length(recalled) <= limit) {
+                out.add(recalled);
+                used += length(recalled);
+            } else {
+                log.info("上下文预算不足,本轮不注入长期记忆");
+            }
+        }
+
+        int start = 0;
+        if (!contextMessages.isEmpty() && "system".equals(contextMessages.get(0).role())) {
+            AgentMessage summary = contextMessages.get(0);
+            if (used + length(summary) <= limit) {
+                out.add(summary);
+                used += length(summary);
+            } else {
+                log.info("上下文预算不足,本轮不注入摘要");
+            }
+            start = 1;
+        }
+
+        List<List<AgentMessage>> turns = splitTurns(contextMessages.subList(start, contextMessages.size()));
+        List<List<AgentMessage>> kept = new ArrayList<>();
+        int remaining = Math.max(0, limit - used);
+        for (int i = turns.size() - 1; i >= 0; i--) {
+            int turnLength = turns.get(i).stream().mapToInt(AssistantService::length).sum();
+            if (turnLength <= remaining) {
+                kept.add(0, turns.get(i));
+                remaining -= turnLength;
+            } else {
+                break;
+            }
+        }
+        if (kept.isEmpty() && !turns.isEmpty()) {
+            // 预算再紧,也至少留最近一轮 —— 否则模型不知道"刚才在说什么"
+            kept.add(turns.get(turns.size() - 1));
+            log.warn("上下文预算不足,只保留了最近一轮历史");
+        }
+        for (List<AgentMessage> turn : kept) {
+            out.addAll(turn);
+        }
+        if (kept.size() < turns.size()) {
+            log.info("上下文预算不足,丢掉了 {} 轮较旧历史", turns.size() - kept.size());
+        }
+        return out;
+    }
+
+    private static List<List<AgentMessage>> splitTurns(List<AgentMessage> messages) {
+        List<List<AgentMessage>> turns = new ArrayList<>();
+        for (AgentMessage message : messages) {
+            if ("user".equals(message.role()) || turns.isEmpty()) {
+                turns.add(new ArrayList<>());
+            }
+            turns.get(turns.size() - 1).add(message);
+        }
+        return turns;
+    }
+
+    private static int length(AgentMessage message) {
+        return message.content() == null ? 0 : message.content().length();
     }
 }

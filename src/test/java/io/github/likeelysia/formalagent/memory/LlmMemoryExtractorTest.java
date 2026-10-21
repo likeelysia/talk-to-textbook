@@ -50,6 +50,10 @@ class LlmMemoryExtractorTest {
     }
 
     /** 断言通常只关心"抠出来的原文",分数另外单测。 */
+    private static List<String> texts(MemoryExtractor.Result result) {
+        return texts(result.candidates());
+    }
+
     private static List<String> texts(List<MemoryCandidate> candidates) {
         return candidates.stream().map(MemoryCandidate::text).toList();
     }
@@ -125,7 +129,7 @@ class LlmMemoryExtractorTest {
                 [{"text":"用户叫鹏哥","keep":1.0},
                  {"text":"用户喜欢看游戏资讯","keep":0.6}]""";
 
-        List<MemoryCandidate> candidates = extractor(llm, 5).extract(turns());
+        List<MemoryCandidate> candidates = extractor(llm, 5).extract(turns()).candidates();
 
         assertThat(texts(candidates)).containsExactly("用户叫鹏哥", "用户喜欢看游戏资讯");
         assertThat(candidates.get(0).mustRemember()).isTrue();
@@ -138,7 +142,7 @@ class LlmMemoryExtractorTest {
         FakeLlm llm = new FakeLlm();
         llm.reply = "[\"用户偏好给出处\"]";
 
-        List<MemoryCandidate> candidates = extractor(llm, 5).extract(turns());
+        List<MemoryCandidate> candidates = extractor(llm, 5).extract(turns()).candidates();
 
         assertThat(candidates).hasSize(1);
         assertThat(candidates.get(0).keep()).isEqualTo(MemoryCandidate.KEEP_DEFAULT);
@@ -146,27 +150,44 @@ class LlmMemoryExtractorTest {
     }
 
     @Test
-    @DisplayName("模型挂了 / 返回空:返回空表,绝不抛")
-    void failureIsSwallowed() {
+    @DisplayName("模型挂了 / 返回空:标记为失败,不能当'成功但没有记忆'")
+    void failureIsReported() {
         FakeLlm boom = new FakeLlm();
         boom.boom = new IllegalStateException("429 限流");
-        assertThat(extractor(boom, 5).extract(turns())).isEmpty();
+        assertThat(extractor(boom, 5).extract(turns()).success()).isFalse();
 
         FakeLlm blank = new FakeLlm();
         blank.reply = "   ";
-        assertThat(extractor(blank, 5).extract(turns())).isEmpty();
+        assertThat(extractor(blank, 5).extract(turns()).success()).isFalse();
     }
 
     @Test
-    @DisplayName("整段都是寒暄:压根不叫模型(省一次调用)")
+    @DisplayName("整段都是寒暄:压根不叫模型(省一次调用),算成功但没有候选")
     void chatterNeverReachesTheModel() {
         FakeLlm llm = new FakeLlm();
         llm.reply = "[\"不该被取到\"]";
 
-        List<MemoryCandidate> result = extractor(llm, 5).extract(List.of(
+        MemoryExtractor.Result result = extractor(llm, 5).extract(List.of(
                 ChatMessage.user("你好"), ChatMessage.assistant("你好呀!", null)));
 
-        assertThat(result).isEmpty();
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.success()).isTrue();
         assertThat(llm.last).isNull();
+    }
+
+    @Test
+    @DisplayName("remember / forget 是独立标记,不再只看 keep")
+    void parsesExplicitIntentFlags() {
+        FakeLlm llm = new FakeLlm();
+        llm.reply = """
+                [{"text":"用户叫鹏哥","keep":0.6,"remember":true},
+                 {"text":"用户说别再提猫","keep":0.9,"forget":true}]""";
+
+        List<MemoryCandidate> candidates = extractor(llm, 5).extract(turns()).candidates();
+
+        assertThat(candidates.get(0).mustRemember()).isTrue();
+        assertThat(candidates.get(0).wantsForget()).isFalse();
+        assertThat(candidates.get(1).mustRemember()).isFalse();
+        assertThat(candidates.get(1).wantsForget()).isTrue();
     }
 }

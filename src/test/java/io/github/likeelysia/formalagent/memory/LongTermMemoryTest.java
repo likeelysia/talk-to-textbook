@@ -42,13 +42,14 @@ class LongTermMemoryTest {
         final List<List<ChatMessage>> calls = new ArrayList<>();
 
         @Override
-        public List<MemoryCandidate> extract(List<ChatMessage> turns) {
+        public MemoryExtractor.Result extract(List<ChatMessage> turns) {
             calls.add(new ArrayList<>(turns));
             if (boom != null) {
                 throw boom;
             }
             double keep = mustRemember ? MemoryCandidate.KEEP_MUST : MemoryCandidate.KEEP_DEFAULT;
-            return result.stream().map(text -> new MemoryCandidate(text, keep)).toList();
+            return MemoryExtractor.Result.ok(result.stream()
+                    .map(text -> new MemoryCandidate(text, keep)).toList());
         }
     }
 
@@ -169,8 +170,8 @@ class LongTermMemoryTest {
     }
 
     @Test
-    @DisplayName("意思一样的两条合并,而不是堆两条")
-    void similarMemoriesAreMerged() {
+    @DisplayName("相似但不完全相同:不再按余弦静默覆盖,保留成两条")
+    void similarButNotIdenticalMemoriesAreNotSilentlyOverwritten() {
         LongTermMemory memory = memory(true, 1);
         String id = conversationWithTurns(1);
         extractor.result = List.of("用户在学物理");
@@ -180,8 +181,9 @@ class LongTermMemoryTest {
         conversations.record(id, "第二轮的问题,关于物理的", "第二轮的回答", null);
         memory.maybeExtract(conversations.get(id));
 
-        assertThat(store.list(conversations.get(id).scopeId())).hasSize(1);
-        assertThat(texts(store.list(conversations.get(id).scopeId()))).containsExactly("用户在学物理(正在复习)");
+        assertThat(store.list(conversations.get(id).scopeId())).hasSize(2);
+        assertThat(texts(store.list(conversations.get(id).scopeId())))
+                .containsExactlyInAnyOrder("用户在学物理", "用户在学物理(正在复习)");
     }
 
     @Test
@@ -212,19 +214,19 @@ class LongTermMemoryTest {
     }
 
     @Test
-    @DisplayName("embedding 不可用:召回退化成按时间取最近几条")
-    void recallFallsBackToRecency() {
+    @DisplayName("embedding 不可用且字面不相关:返回 0 条,不按时间补满")
+    void recallDoesNotFillWithRecency() {
         LongTermMemory memory = memory(true, 1);
         store.update("scope1", list -> List.of(
                 MemoryEntry.at("m1", "scope1", "旧的记忆", "c1", 1000L, null),
                 MemoryEntry.at("m2", "scope1", "新的记忆", "c1", 2000L, null)));
         embedder.boom = new IllegalStateException("连不上 8090");
 
-        assertThat(texts(memory.recall("scope1", "随便问点什么", 1))).containsExactly("新的记忆");
+        assertThat(memory.recall("scope1", "随便问点什么", 1)).isEmpty();
     }
 
     @Test
-    @DisplayName("embedding 不可用:提问里命中的记忆排前面(不会被新记的挤掉)")
+    @DisplayName("embedding 不可用:提问里命中的记忆排前面")
     void recallFallbackPrefersLiteralHit() {
         LongTermMemory memory = memory(true, 1);
         store.update("scope1", list -> List.of(
@@ -234,8 +236,8 @@ class LongTermMemoryTest {
 
         // 命中的是那条旧的 → 它得顶到前面(纯按时间会把它埋了)
         assertThat(texts(memory.recall("scope1", "回答要不要给出处?", 1))).containsExactly("用户要求回答给出处");
-        // 一条都不命中 → 退回按时间(行为跟以前一模一样)
-        assertThat(texts(memory.recall("scope1", "最近在忙什么", 1))).containsExactly("用户在学物理");
+        // 一条都不命中 → 不召回,而不是拿最近那条强行补位
+        assertThat(memory.recall("scope1", "最近在忙什么", 1)).isEmpty();
     }
 
     @Test
@@ -253,8 +255,9 @@ class LongTermMemoryTest {
         LongTermMemory memory = memory(true, 1);
         assertThat(memory.recallAsMessage("scope1", "随便问问")).isNull();
 
-        store.update("scope1", list -> List.of(MemoryEntry.of("scope1", "用户偏好给出处", "c1", null)));
-        AgentMessage message = memory.recallAsMessage("scope1", "随便问问");
+        store.update("scope1", list -> List.of(
+                MemoryEntry.of("scope1", "用户偏好给出处", "c1", FakeEmbedder.vector("偏好"))));
+        AgentMessage message = memory.recallAsMessage("scope1", "偏好");
 
         assertThat(message.role()).isEqualTo("system");
         assertThat(message.content()).contains("长期记忆").contains("- 用户偏好给出处")
@@ -278,16 +281,19 @@ class LongTermMemoryTest {
     }
 
     @Test
-    @DisplayName("提炼失败也要把水位推走(不然每轮都对着同一段重试)")
-    void failedExtractionStillAdvancesWatermark() {
+    @DisplayName("提炼失败:不推水位、不丢机会,并退避避免每轮重试")
+    void failedExtractionKeepsWatermarkAndBacksOff() {
         LongTermMemory memory = memory(true, 1);
         extractor.boom = new IllegalStateException("提炼模型超时");
         String id = conversationWithTurns(1);
 
         memory.maybeExtract(conversations.get(id));
 
-        assertThat(conversations.get(id).memoryCount()).isEqualTo(2);
+        assertThat(conversations.get(id).memoryCount()).isZero();
         assertThat(store.list(conversations.get(id).scopeId())).isEmpty();
+
+        memory.maybeExtract(conversations.get(id));       // 退避期内不再打模型
+        assertThat(extractor.calls).hasSize(1);
     }
 
     // ==================== 治理(E 段):上限 / 钉住 / 看得见改得动 ====================

@@ -94,7 +94,7 @@ class AssistantServiceTest {
     private ConversationService conversations;
     private FakeEmbedder embedder;
     private MemoryStore memoryStore;
-    private MemoryExtractor extractor = turns -> List.of();
+    private MemoryExtractor extractor = turns -> MemoryExtractor.Result.empty();
 
     @BeforeEach
     void setUp() {
@@ -260,7 +260,8 @@ class AssistantServiceTest {
     @Test
     @DisplayName("回答记完账就在后台提炼一次(攒够轮数)")
     void extractionRunsAfterTheTurnIsRecorded() {
-        extractor = turns -> List.of(new MemoryCandidate("用户在准备物理考试", 0.5));
+        extractor = turns -> MemoryExtractor.Result.ok(
+                List.of(new MemoryCandidate("用户在准备物理考试", 0.5)));
         LongTermMemory longTerm = longTerm(true, 1);
         AssistantService assistant = assistant(6, true, longTerm);
         String id = conversations.create("会提炼").id();

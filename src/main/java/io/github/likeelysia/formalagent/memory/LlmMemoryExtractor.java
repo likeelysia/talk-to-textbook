@@ -49,6 +49,14 @@ public class LlmMemoryExtractor implements MemoryExtractor {
     /** 装分数的字段名。 */
     private static final List<String> SCORE_FIELDS = List.of("keep", "score", "importance");
 
+    /** 用户明确要求记住的标记字段。 */
+    private static final List<String> REMEMBER_FIELDS =
+            List.of("remember", "explicitremember", "explicit_remember", "mustremember", "must_remember");
+
+    /** 用户明确要求忘掉的标记字段。 */
+    private static final List<String> FORGET_FIELDS =
+            List.of("forget", "explicitforget", "explicit_forget", "mustforget", "must_forget");
+
     /** 装真正数组的外壳字段名。 */
     private static final List<String> WRAPPER_FIELDS =
             List.of("memories", "items", "points", "data", "content", "result");
@@ -76,10 +84,10 @@ public class LlmMemoryExtractor implements MemoryExtractor {
     }
 
     @Override
-    public List<MemoryCandidate> extract(List<ChatMessage> turns) {
+    public Result extract(List<ChatMessage> turns) {
         List<ChatMessage> kept = MemoryFilter.prescreen(turns == null ? List.of() : turns, minChars);
         if (kept.isEmpty()) {
-            return List.of();                       // 全是寒暄:省一次模型调用
+            return Result.empty();                  // 全是寒暄:省一次模型调用,算"成功但没有"
         }
 
         String raw;
@@ -89,14 +97,24 @@ public class LlmMemoryExtractor implements MemoryExtractor {
                     new Message("user", payload(kept))));
         } catch (RuntimeException e) {
             log.warn("长期记忆提炼调用模型失败:{}", e.getMessage());
-            return List.of();
+            return Result.failed();
+        }
+        if (raw == null || raw.isBlank()) {
+            log.warn("长期记忆提炼模型返回空内容");
+            return Result.failed();
         }
 
         List<MemoryCandidate> candidates = parse(raw);
+        boolean parsed = tryRead(stripFences(raw.strip())) != null;
+        if (candidates.isEmpty() && !parsed) {
+            // 既不是 JSON、又一条都剥不出来 → 当成临时失败,保留水位下次重试
+            log.warn("长期记忆提炼返回无法解析:{}", raw.replaceAll("\\s+", " ").strip());
+            return Result.failed();
+        }
         if (log.isDebugEnabled()) {
             log.debug("长期记忆候选取到 {} 条:{}", candidates.size(), candidates);
         }
-        return candidates;
+        return Result.ok(candidates);
     }
 
     /** 给模型的输入:这一段还没提炼过的对话。 */
@@ -179,11 +197,19 @@ public class LlmMemoryExtractor implements MemoryExtractor {
             return;
         }
         Double score = firstNumber(node, SCORE_FIELDS);
-        if (score != null && score < keepScore) {
+        boolean remember = firstBoolean(node, REMEMBER_FIELDS);
+        boolean forget = firstBoolean(node, FORGET_FIELDS);
+        if (!forget && score != null && score < keepScore) {
             return;                                          // 第二道闸:可记可不记的不要
         }
-        // 分数原样留着:1.0 是“用户明确要求记住的”的暗号,入库时要拿去钉住
-        out.add(new MemoryCandidate(text, score == null ? MemoryCandidate.KEEP_DEFAULT : score));
+        if (score == null) {
+            score = MemoryCandidate.KEEP_DEFAULT;
+        }
+        if (score >= MemoryCandidate.KEEP_MUST) {
+            remember = true;                                 // 兼容旧提示词:1.0 = 明确要求记住
+        }
+        // 分数是"重不重要",remember/forget 才是"用户授没授权";两者分开存
+        out.add(new MemoryCandidate(text, score, remember, forget));
     }
 
     /** 行模式兜底:去掉列表符号,一行算一条。 */
@@ -205,7 +231,8 @@ public class LlmMemoryExtractor implements MemoryExtractor {
         for (MemoryCandidate candidate : raw) {
             String clean = candidate.text() == null ? "" : candidate.text().replaceAll("\\s+", " ").strip();
             if (!clean.isBlank()) {
-                unique.putIfAbsent(clean, new MemoryCandidate(clean, candidate.keep()));
+                unique.putIfAbsent(clean, new MemoryCandidate(clean, candidate.keep(),
+                        candidate.explicitRemember(), candidate.explicitForget()));
             }
             if (unique.size() >= maxItems) {
                 break;
@@ -261,6 +288,28 @@ public class LlmMemoryExtractor implements MemoryExtractor {
             }
         }
         return null;
+    }
+
+    private static boolean firstBoolean(JsonNode node, List<String> fields) {
+        var it = node.fields();
+        while (it.hasNext()) {
+            var entry = it.next();
+            if (!fields.contains(entry.getKey().toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            JsonNode value = entry.getValue();
+            if (value.isBoolean()) {
+                return value.asBoolean();
+            }
+            if (value.isNumber()) {
+                return value.asInt() != 0;
+            }
+            if (value.isTextual()) {
+                String text = value.asText("").strip().toLowerCase(Locale.ROOT);
+                return "true".equals(text) || "1".equals(text) || "yes".equals(text);
+            }
+        }
+        return false;
     }
 
     private static JsonNode findWrapper(JsonNode node) {

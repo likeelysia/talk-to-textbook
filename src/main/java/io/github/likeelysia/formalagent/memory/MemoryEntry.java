@@ -131,6 +131,12 @@ public record MemoryEntry(
                 newEmbedding, System.currentTimeMillis(), STATUS_ACTIVE, supersedes);
     }
 
+    /** 补建向量时用:只换向量,文本版本保持不变(调用方负责确认文本没被改过)。 */
+    public MemoryEntry withEmbedding(float[] newEmbedding) {
+        return new MemoryEntry(id, scopeId, text, conversationId, createdAt, lastAccessAt, pinned, origin,
+                newEmbedding, updatedAt, status, supersedes);
+    }
+
     /** 钉住 / 取消钉住。 */
     public MemoryEntry withPinned(boolean newPinned) {
         return new MemoryEntry(id, scopeId, text, conversationId, createdAt, lastAccessAt, newPinned, origin,

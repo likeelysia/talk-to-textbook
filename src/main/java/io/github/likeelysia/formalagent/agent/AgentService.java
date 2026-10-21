@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -39,6 +40,10 @@ public class AgentService {
 
     /** 最多几轮"思考-行动"。 */
     private static final int MAX_STEPS = 6;
+
+    /** 单条工具结果最多回灌多少字符;超了截断并标注,避免一次检索把上下文撑爆。 */
+    @Value("${fa.context.tool-result-max-chars:6000}")
+    private int toolResultMaxChars = 6000;
 
     // 系统提示词已外置到 resources/prompts/agent-system.txt(改文案不用重新理解 Java)
 
@@ -120,10 +125,11 @@ public class AgentService {
                     sink.onStatus("正在查资料(" + name + ")…");
                 }
                 String observation = execute(call);
+                String bounded = boundToolResult(observation);
 
                 trace.add(name + "(" + rawArgs + ")");
-                log.info("工具调用:{} → {}", trace.get(trace.size() - 1), abbreviate(observation));
-                messages.add(AgentMessage.tool(call.id(), observation));
+                log.info("工具调用:{} → {}", trace.get(trace.size() - 1), abbreviate(bounded));
+                messages.add(AgentMessage.tool(call.id(), bounded));
             }
         }
 
@@ -148,6 +154,17 @@ public class AgentService {
         } catch (Exception e) {
             return "工具执行失败:" + e.getMessage();
         }
+    }
+
+    private String boundToolResult(String result) {
+        if (result == null) {
+            return "";
+        }
+        if (toolResultMaxChars <= 0 || result.length() <= toolResultMaxChars) {
+            return result;
+        }
+        return result.substring(0, toolResultMaxChars)
+                + "\n\n[工具结果过长,已截断;需要更多内容请缩小检索范围]";
     }
 
     private static String abbreviate(String s) {

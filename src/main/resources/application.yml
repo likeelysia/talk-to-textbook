@@ -31,6 +31,15 @@ server:
 fa:
   debug: false
 
+  # ---- 统一上下文预算(字符,粗略≈token;第一版按 1 字≈1 token 保守估算)----
+  # max-chars: 核心档案 + 长期记忆 + 摘要 + 最近历史 + 当前问题的总预算
+  # reserve-chars: 给最终回答预留的空间
+  # tool-result-max-chars: 单条工具结果回灌上限,超了截断
+  context:
+    max-chars: ${FA_CONTEXT_MAX_CHARS:14000}
+    reserve-chars: ${FA_CONTEXT_RESERVE_CHARS:3000}
+    tool-result-max-chars: ${FA_TOOL_RESULT_MAX_CHARS:6000}
+
   # ---- 背词工具(词典外置,不打包进 jar)----
   # dict-path: ECDICT 的 stardict.db 路径;默认项目下 dict/stardict.db
   # max-words: 单篇文章最多提取多少个单词,防止粘贴整本书
@@ -150,6 +159,8 @@ fa:
       keep-score: ${FA_MEMORY_KEEP_SCORE:0.5}
       # 每次提问最多召回几条带进上下文
       recall-top-k: ${FA_MEMORY_RECALL_TOP_K:5}
+      # 召回最低相关度:低于它的不注入,允许本轮 0 条(不再按时间补满)
+      recall-min-score: ${FA_MEMORY_RECALL_MIN_SCORE:0.30}
       # 两条记忆余弦相似度超过它就当成同一件事,合并成一条
       dedup-similarity: ${FA_MEMORY_DEDUP:0.9}
       # 一次提炼最多入库几条
