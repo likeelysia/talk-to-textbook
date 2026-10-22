@@ -40,6 +40,21 @@ class LlmMemoryReconcilerTest {
     }
 
     @Test
+    void parsesCoreConflictWithoutTarget() {
+        LlmClient llm = (history, options) -> """
+                [{"index":1,"op":"CORE_CONFLICT","reason":"和核心档案的考研目标冲突"}]
+                """;
+        LlmMemoryReconciler reconciler = new LlmMemoryReconciler(llm, mapper, true);
+
+        Map<Integer, MemoryReconciler.Decision> decisions = reconciler.decide(
+                List.of(new MemoryCandidate("用户要就业", 0.9)),
+                List.of(List.of(entry("m1"))));
+
+        assertThat(decisions).containsKey(0);
+        assertThat(decisions.get(0).op()).isEqualTo(MemoryReconciler.CORE_CONFLICT);
+    }
+
+    @Test
     void malformedOutputFallsBackSilently() {
         LlmClient llm = (history, options) -> "不是 JSON";
         LlmMemoryReconciler reconciler = new LlmMemoryReconciler(llm, mapper, true);

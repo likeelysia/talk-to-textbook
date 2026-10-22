@@ -2,10 +2,13 @@ package io.github.likeelysia.formalagent.web;
 
 import io.github.likeelysia.formalagent.memory.CoreMemoryStore;
 import io.github.likeelysia.formalagent.memory.LongTermMemory;
+import io.github.likeelysia.formalagent.memory.MemoryConflict;
+import io.github.likeelysia.formalagent.memory.MemoryConflictStore;
 import io.github.likeelysia.formalagent.memory.MemoryEntry;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -43,10 +46,19 @@ public class MemoryController {
 
     private final LongTermMemory memory;
     private final CoreMemoryStore coreMemory;
+    private final MemoryConflictStore conflicts;
 
-    public MemoryController(LongTermMemory memory, CoreMemoryStore coreMemory) {
+    @Autowired
+    public MemoryController(LongTermMemory memory, CoreMemoryStore coreMemory,
+                            MemoryConflictStore conflicts) {
         this.memory = memory;
         this.coreMemory = coreMemory;
+        this.conflicts = conflicts;
+    }
+
+    /** 测试 / 手工装配用:不接冲突记录。 */
+    public MemoryController(LongTermMemory memory, CoreMemoryStore coreMemory) {
+        this(memory, coreMemory, null);
     }
 
     @GetMapping("/memory")
@@ -71,6 +83,25 @@ public class MemoryController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("text", text);
         body.put("maxChars", coreMemory.maxChars());
+        return body;
+    }
+
+    /** 核心档案冲突的待确认列表(自动提炼发现,不自动改核心档案)。 */
+    @GetMapping("/memory/conflicts")
+    public Map<String, Object> conflicts() {
+        List<MemoryConflict> list = conflicts == null ? List.of() : conflicts.list();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("count", list.size());
+        body.put("conflicts", list);
+        return body;
+    }
+
+    /** 忽略一条冲突提示。 */
+    @DeleteMapping("/memory/conflicts/{id}")
+    public Map<String, Object> dismissConflict(@PathVariable String id) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", id);
+        body.put("dismissed", conflicts != null && conflicts.dismiss(id));
         return body;
     }
 

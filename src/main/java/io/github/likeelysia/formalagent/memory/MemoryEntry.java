@@ -170,6 +170,15 @@ public record MemoryEntry(
         return STATUS_ACTIVE.equals(status);
     }
 
+    /**
+     * 语义上这是「最后一次被召回」的时间。
+     *
+     * <p>JSON 字段名为了兼容旧文件仍叫 {@code lastAccessAt};代码里请用这个更准确的名字。
+     */
+    public long lastRecalledAt() {
+        return lastAccessAt;
+    }
+
     /** 有没有向量(没有 = 召回时只能按时间排,不能按相似度排)。 */
     public boolean hasEmbedding() {
         return embedding != null;

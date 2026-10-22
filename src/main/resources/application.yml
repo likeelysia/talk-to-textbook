@@ -160,6 +160,7 @@ fa:
       # 每次提问最多召回几条带进上下文
       recall-top-k: ${FA_MEMORY_RECALL_TOP_K:5}
       # 召回最低相关度:低于它的不注入,允许本轮 0 条(不再按时间补满)
+      # 默认 0.30 由 MemoryRecallCalibrationTest 的小样本标定;真实数据不同就调这个值
       recall-min-score: ${FA_MEMORY_RECALL_MIN_SCORE:0.30}
       # 两条记忆余弦相似度超过它就当成同一件事,合并成一条
       dedup-similarity: ${FA_MEMORY_DEDUP:0.9}
@@ -175,6 +176,8 @@ fa:
     core:
       path: ${FA_MEMORY_CORE:data/memory/core.md}
       max-chars: ${FA_MEMORY_CORE_MAX_CHARS:800}
+    # 核心档案冲突的待确认记录(只提示,不自动改档案)
+    conflicts-path: ${FA_MEMORY_CONFLICTS:data/memory/conflicts.json}
 
   # ---- 教材切块 / 灌库断点 ----
   extract:

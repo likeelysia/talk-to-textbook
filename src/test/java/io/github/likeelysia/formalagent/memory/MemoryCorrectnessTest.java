@@ -60,9 +60,16 @@ class MemoryCorrectnessTest {
 
     private LongTermMemory memory(MemoryExtractor extractor, EmbeddingClient embedder,
                                   MemoryReconciler reconciler, int maxStored, Executor executor) {
+        return memory(extractor, embedder, reconciler, maxStored, executor, null);
+    }
+
+    private LongTermMemory memory(MemoryExtractor extractor, EmbeddingClient embedder,
+                                  MemoryReconciler reconciler, int maxStored, Executor executor,
+                                  MemoryConflictStore conflicts) {
         AppConfig.Memory.LongTerm config = new AppConfig.Memory.LongTerm(
                 true, tmp.resolve("mem").toString(), 1, 0.5, 5, 0.9, 5, 0, maxStored);
-        return new LongTermMemory(store, extractor, embedder, conversations, config, executor, reconciler);
+        return new LongTermMemory(store, extractor, embedder, conversations, config, executor,
+                reconciler, conflicts);
     }
 
     private String conversationWithTurns(int turns) {
@@ -240,6 +247,24 @@ class MemoryCorrectnessTest {
 
         assertThat(memory.list(a)).isEmpty();
         assertThat(store.list(a)).anyMatch(e -> MemoryEntry.STATUS_DELETED.equals(e.status()));
+    }
+
+    @Test
+    @DisplayName("与核心档案冲突:只记录待确认,候选仍作为长期记忆保存,核心档案不动")
+    void coreConflictIsRecordedNotApplied() {
+        String a = conversationWithTurns(1);
+        MemoryConflictStore conflicts = new MemoryConflictStore(
+                new ObjectMapper(), tmp.resolve("conflicts.json"));
+        MemoryReconciler coreConflict = (candidates, neighbors) -> Map.of(
+                0, new MemoryReconciler.Decision(MemoryReconciler.CORE_CONFLICT, null, null));
+        LongTermMemory memory = memory(new StubExtractor(), fixedVector(1, 0), coreConflict, 500,
+                Runnable::run, conflicts);
+
+        memory.storeMemories(a, List.of(MemoryCandidate.of("用户要就业")), a);
+
+        assertThat(conflicts.list()).hasSize(1);
+        assertThat(conflicts.list().get(0).candidateText()).isEqualTo("用户要就业");
+        assertThat(memory.list(a)).extracting(MemoryEntry::text).containsExactly("用户要就业");
     }
 
     @Test

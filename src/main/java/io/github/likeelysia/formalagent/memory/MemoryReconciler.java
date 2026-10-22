@@ -15,6 +15,8 @@ public interface MemoryReconciler {
     String UPDATE = "UPDATE";
     String DELETE = "DELETE";
     String NOOP = "NOOP";
+    /** 候选和核心档案冲突:记录待确认,不改核心档案。 */
+    String CORE_CONFLICT = "CORE_CONFLICT";
 
     /**
      * @param op        ADD / UPDATE / DELETE / NOOP

@@ -177,7 +177,7 @@ public class MemoryStore {
             List<MemoryEntry> next = new ArrayList<>(file.entries().size());
             boolean dirty = false;
             for (MemoryEntry entry : file.entries()) {
-                if (ids.contains(entry.id()) && now - entry.lastAccessAt() > TOUCH_GRANULARITY_MS) {
+                if (ids.contains(entry.id()) && now - entry.lastRecalledAt() > TOUCH_GRANULARITY_MS) {
                     next.add(entry.withAccess(now));
                     dirty = true;
                 } else {

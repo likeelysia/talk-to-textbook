@@ -954,6 +954,9 @@ const coreTextEl = document.getElementById('coreText');
 const coreCountEl = document.getElementById('coreCount');
 const coreSaveBtn = document.getElementById('coreSave');
 const memHistoryEl = document.getElementById('memHistory');
+const memConflictsEl = document.getElementById('memConflicts');
+const memConflictCountEl = document.getElementById('memConflictCount');
+const memConflictListEl = document.getElementById('memConflictList');
 
 /** 记忆接口都要带上“当前会话”(后端按它找记忆域)。 */
 function memQuery() {
@@ -987,6 +990,56 @@ async function saveCoreMemory() {
         coreCountEl.textContent = `${(data.text || '').length} / ${data.maxChars}`;
     } catch (e) {
         window.alert('没保存:' + e.message);
+    }
+}
+
+/** 核心档案冲突:只提示,不自动改档案;用户自己决定改档案还是忽略。 */
+async function loadConflicts() {
+    if (!memConflictsEl) return;
+    try {
+        const data = await apiJson('/api/memory/conflicts');
+        const list = data.conflicts || [];
+        memConflictCountEl.textContent = list.length ? `(${list.length})` : '';
+        memConflictsEl.hidden = list.length === 0;
+        memConflictListEl.innerHTML = '';
+        list.forEach(c => {
+            const row = document.createElement('div');
+            row.className = 'mem-conflict-item';
+
+            const text = document.createElement('span');
+            text.className = 'text';
+            text.textContent = c.candidateText || '';
+            text.title = '自动提炼和核心档案对不上;改完档案或点忽略即可';
+
+            const edit = document.createElement('button');
+            edit.type = 'button';
+            edit.className = 'mini';
+            edit.textContent = '去改档案';
+            edit.addEventListener('click', () => {
+                coreTextEl.focus();
+                coreTextEl.scrollIntoView({ block: 'nearest' });
+            });
+
+            const ignore = document.createElement('button');
+            ignore.type = 'button';
+            ignore.className = 'mini';
+            ignore.textContent = '忽略';
+            ignore.addEventListener('click', () => dismissConflict(c));
+
+            row.append(text, edit, ignore);
+            memConflictListEl.appendChild(row);
+        });
+    } catch (e) {
+        memConflictsEl.hidden = true;
+    }
+}
+
+async function dismissConflict(c) {
+    try {
+        await apiJson('/api/memory/conflicts/' + encodeURIComponent(c.id), { method: 'DELETE' });
+        await loadConflicts();
+    } catch (e) {
+        window.alert('没忽略:' + e.message);
     }
 }
 
@@ -1198,6 +1251,7 @@ function openMemory() {
     loadMemories();
     loadMemoryScope();
     loadCoreMemory();
+    loadConflicts();
 }
 
 function closeMemory() {

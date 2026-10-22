@@ -77,6 +77,7 @@ public class LongTermMemory {
     private final AppConfig.Memory.LongTerm config;
     private final Executor executor;
     private final MemoryReconciler reconciler;
+    private final MemoryConflictStore conflicts;
 
     /** 每个会话的失败退避:避免服务挂了以后每一轮都立即重试。 */
     private final Map<String, Retry> retries = new ConcurrentHashMap<>();
@@ -92,8 +93,8 @@ public class LongTermMemory {
     @Autowired
     public LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                           ConversationService conversations, AppConfig config,
-                          MemoryReconciler reconciler) {
-        this(store, extractor, embedder, conversations, longTermOf(config), worker(), reconciler);
+                          MemoryReconciler reconciler, MemoryConflictStore conflicts) {
+        this(store, extractor, embedder, conversations, longTermOf(config), worker(), reconciler, conflicts);
     }
 
     /** 测试 / 手工装配用:传一个"就在当前线程跑"的 Executor,提炼就变成同步的,断言才好写。 */
@@ -101,12 +102,18 @@ public class LongTermMemory {
                           ConversationService conversations, AppConfig.Memory.LongTerm config,
                           Executor executor) {
         this(store, extractor, embedder, conversations, config, executor,
-                (candidates, neighbors) -> java.util.Map.of());
+                (candidates, neighbors) -> java.util.Map.of(), null);
     }
 
     LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                    ConversationService conversations, AppConfig.Memory.LongTerm config,
                    Executor executor, MemoryReconciler reconciler) {
+        this(store, extractor, embedder, conversations, config, executor, reconciler, null);
+    }
+
+    LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
+                   ConversationService conversations, AppConfig.Memory.LongTerm config,
+                   Executor executor, MemoryReconciler reconciler, MemoryConflictStore conflicts) {
         this.store = store;
         this.extractor = extractor;
         this.embedder = embedder;
@@ -114,6 +121,7 @@ public class LongTermMemory {
         this.config = config;
         this.executor = executor;
         this.reconciler = reconciler;
+        this.conflicts = conflicts;
     }
 
     /** 开关(关掉 = 既不提炼也不召回)。 */
@@ -433,6 +441,7 @@ public class LongTermMemory {
         Map<Integer, MemoryReconciler.Decision> decisions = reconciler.decide(candidates, neighbors);
 
         long[] counts = new long[3];       // 0=新增 1=覆盖 2=删除
+        List<String> conflictTexts = new ArrayList<>();
         MemoryStore.BatchCommit commit = store.updateBatch(scopeId, expectedGeneration, batchKey, entries -> {
             List<MemoryEntry> next = new ArrayList<>(entries);
             for (int i = 0; i < candidates.size(); i++) {
@@ -442,6 +451,15 @@ public class LongTermMemory {
                     continue;              // 用户删过、又没明确要求重新记 → 不复活
                 }
                 MemoryReconciler.Decision decision = decisions.get(i);
+                if (decision != null && MemoryReconciler.CORE_CONFLICT.equalsIgnoreCase(decision.op())) {
+                    // 和核心档案冲突:只记录,不改核心档案;候选本身仍作为长期记忆保存
+                    conflictTexts.add(candidate.text());
+                    if (indexOfSameText(next, candidate.text()) < 0) {
+                        next.add(entryFor(scopeId, candidate, conversationId, vector));
+                        counts[0]++;
+                    }
+                    continue;
+                }
                 boolean applied = decision != null
                         && applyDecision(next, decision, candidate, vector, neighbors.get(i),
                         scopeId, conversationId, counts);
@@ -451,6 +469,15 @@ public class LongTermMemory {
             }
             return trim(scopeId, next);
         });
+        if (!commit.stale() && !commit.duplicate() && conflicts != null && !conflictTexts.isEmpty()) {
+            try {
+                conflicts.addAll(scopeId, conflictTexts, conversationId);
+                log.info("记忆域 {} 记录了 {} 条核心档案冲突待确认", scopeId, conflictTexts.size());
+            } catch (RuntimeException e) {
+                // 冲突记录只是提示,写失败不能影响记忆本身
+                log.warn("核心档案冲突记录保存失败:{}", e.getMessage());
+            }
+        }
         return new StoreOutcome(counts[0], counts[1], counts[2], commit.stale(), commit.duplicate());
     }
 
@@ -779,7 +806,7 @@ public class LongTermMemory {
                     scopeId, pinned.size(), max);
         } else if (max > 0 && pinned.size() + normal.size() > max) {
             int room = Math.max(0, max - pinned.size());
-            normal.sort(Comparator.comparingLong(MemoryEntry::lastAccessAt)
+            normal.sort(Comparator.comparingLong(MemoryEntry::lastRecalledAt)
                     .thenComparingLong(MemoryEntry::createdAt));
             int remove = normal.size() - room;
             normal = new ArrayList<>(normal.subList(remove, normal.size()));

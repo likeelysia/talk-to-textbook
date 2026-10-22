@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.memory.CoreMemoryStore;
 import io.github.likeelysia.formalagent.memory.LongTermMemory;
+import io.github.likeelysia.formalagent.memory.MemoryConflict;
+import io.github.likeelysia.formalagent.memory.MemoryConflictStore;
 import io.github.likeelysia.formalagent.memory.MemoryEntry;
 import java.util.List;
 import java.util.Map;
@@ -34,11 +36,14 @@ class MemoryControllerTest {
     @Mock
     private CoreMemoryStore coreMemory;
 
+    @Mock
+    private MemoryConflictStore conflicts;
+
     private MemoryController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MemoryController(memory, coreMemory);
+        controller = new MemoryController(memory, coreMemory, conflicts);
     }
 
     private static MemoryEntry entry() {
@@ -146,5 +151,30 @@ class MemoryControllerTest {
 
         assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("attachment");
         assertThat(response.getBody()).containsKey("memories");
+    }
+
+    @Test
+    @DisplayName("核心档案冲突:列表回 count + 候选文本")
+    void conflictsAreListed() {
+        MemoryConflict conflict = MemoryConflict.of("s", "用户要就业", "c1");
+        when(conflicts.list()).thenReturn(List.of(conflict));
+
+        Map<String, Object> body = controller.conflicts();
+
+        assertThat(body.get("count")).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<MemoryConflict> list = (List<MemoryConflict>) body.get("conflicts");
+        assertThat(list.get(0).candidateText()).isEqualTo("用户要就业");
+    }
+
+    @Test
+    @DisplayName("冲突可以忽略")
+    void conflictsCanBeDismissed() {
+        when(conflicts.dismiss("c1")).thenReturn(true);
+
+        Map<String, Object> body = controller.dismissConflict("c1");
+
+        assertThat(body.get("dismissed")).isEqualTo(true);
+        verify(conflicts).dismiss("c1");
     }
 }

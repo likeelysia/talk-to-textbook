@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -29,12 +30,21 @@ public class LlmMemoryReconciler implements MemoryReconciler {
     private final LlmClient llm;
     private final ObjectMapper mapper;
     private final boolean enabled;
+    private final CoreMemoryStore coreMemory;
 
+    @Autowired
     public LlmMemoryReconciler(LlmClient llm, ObjectMapper mapper,
-                               @Value("${fa.memory.long-term.reconcile:true}") boolean enabled) {
+                               @Value("${fa.memory.long-term.reconcile:true}") boolean enabled,
+                               CoreMemoryStore coreMemory) {
         this.llm = llm;
         this.mapper = mapper;
         this.enabled = enabled;
+        this.coreMemory = coreMemory;
+    }
+
+    /** 测试 / 手工装配用:不接核心档案。 */
+    public LlmMemoryReconciler(LlmClient llm, ObjectMapper mapper, boolean enabled) {
+        this(llm, mapper, enabled, null);
     }
 
     @Override
@@ -47,7 +57,8 @@ public class LlmMemoryReconciler implements MemoryReconciler {
         try {
             raw = llm.chat(List.of(
                     new Message("system", Prompts.get("memory-reconcile")),
-                    new Message("user", payload(candidates, neighbors))));
+                    new Message("user", payload(candidates, neighbors,
+                            coreMemory == null ? "" : coreMemory.read()))));
         } catch (RuntimeException e) {
             log.warn("记忆对账调用模型失败,本次退回旧合并逻辑:{}", e.getMessage());
             return Map.of();
@@ -59,9 +70,15 @@ public class LlmMemoryReconciler implements MemoryReconciler {
         return decisions;
     }
 
-    /** 把候选和它们的相似记忆排成模型好读的文本。 */
-    private static String payload(List<MemoryCandidate> candidates, List<List<MemoryEntry>> neighbors) {
-        StringBuilder sb = new StringBuilder("【候选记忆】\n");
+    /** 把候选、相似记忆和核心档案排成模型好读的文本。 */
+    private static String payload(List<MemoryCandidate> candidates, List<List<MemoryEntry>> neighbors,
+                                  String coreText) {
+        StringBuilder sb = new StringBuilder();
+        if (coreText != null && !coreText.isBlank()) {
+            sb.append("【核心档案(用户手工维护,不要修改它;只用来判断冲突)】\n")
+                    .append(coreText.strip()).append("\n\n");
+        }
+        sb.append("【候选记忆】\n");
         for (int i = 0; i < candidates.size(); i++) {
             sb.append(i + 1).append(". ").append(candidates.get(i).text()).append('\n');
             List<MemoryEntry> near = i < neighbors.size() ? neighbors.get(i) : List.of();
@@ -114,6 +131,10 @@ public class LlmMemoryReconciler implements MemoryReconciler {
                         node.path("target_id").asText("")).trim();
                 String text = node.path("text").asText("").trim();
 
+                if (CORE_CONFLICT.equals(op)) {
+                    out.put(candidateIndex, new Decision(op, null, null));
+                    continue;
+                }
                 if (ADD.equals(op) || NOOP.equals(op)) {
                     out.put(candidateIndex, new Decision(op, null, null));
                     continue;
