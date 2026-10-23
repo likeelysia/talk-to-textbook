@@ -429,9 +429,24 @@ clearBtn.addEventListener('click', () => { setHint(''); clearPicked(); });
 
 /* ---------------- 会话(对话框) ---------------- */
 
+/** 登录失效统一跳登录页;API 返回 401 时不让页面继续拿半个 JSON。 */
+function redirectToLogin() {
+    if (location.pathname.endsWith('/login.html')) return;
+    location.href = '/login.html';
+}
+
+async function authFetch(url, options) {
+    const res = await window.fetch(url, options);
+    if (res.status === 401) {
+        redirectToLogin();
+        throw new Error('登录已过期，请重新登录');
+    }
+    return res;
+}
+
 /** 统一的 JSON 请求:非 2xx 就把后端给的 {"error":"..."} 抛出来。 */
 async function apiJson(url, options) {
-    const res = await fetch(url, options);
+    const res = await authFetch(url, options);
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
 }
@@ -769,7 +784,7 @@ async function answerByStream(question) {
     };
 
     try {
-        const res = await fetch('/api/agent/stream', {
+        const res = await authFetch('/api/agent/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ question, conversationId: currentConversationId }),
@@ -901,7 +916,7 @@ stopBtn.addEventListener('click', () => {
 /* ---------------- 两个接口调用 ---------------- */
 
 async function askText(question) {
-    const res = await fetch('/api/agent', {
+    const res = await authFetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, conversationId: currentConversationId })
@@ -917,7 +932,7 @@ async function askImages(files, question) {
     fd.append('conversationId', currentConversationId);   // 记到当前这个框里
     // 注意:用 FormData 时千万不要自己设 Content-Type,
     //       浏览器会自动带上 multipart 的 boundary
-    const res = await fetch('/api/agent', { method: 'POST', body: fd });
+    const res = await authFetch('/api/agent', { method: 'POST', body: fd });
     if (!res.ok) throw new Error(await readError(res));
     return res.json();
 }
@@ -927,7 +942,7 @@ async function askImages(files, question) {
 async function loadKnowledge() {
     const box = document.getElementById('kb');
     try {
-        const data = await (await fetch('/api/knowledge?sample=5')).json();
+        const data = await (await authFetch('/api/knowledge?sample=5')).json();
         const sources = (data.sources || []).map(escapeHtml).join('、') || '(空)';
         const sample = (data.sample || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
         box.innerHTML = `<div class="stat"><b>${data.count}</b> 条知识点</div>

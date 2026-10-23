@@ -1,6 +1,7 @@
 package io.github.likeelysia.formalagent.web;
 
 import io.github.likeelysia.formalagent.exception.AgentException;
+import io.github.likeelysia.formalagent.exception.OverloadedException;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ApiExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    /** 资源繁忙(模型并发/排队满)→ 503,让前端提示"稍后再试"。 */
+    @ExceptionHandler(OverloadedException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public Map<String, String> onOverloaded(OverloadedException e) {
+        log.warn("服务繁忙:{}", e.getMessage());
+        return Map.of("error", e.getMessage() == null ? "服务繁忙,请稍后重试" : e.getMessage());
+    }
 
     /** 业务异常(参数不对、模型报错等)→ 400。 */
     @ExceptionHandler(AgentException.class)

@@ -74,6 +74,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- 认证:单用户受控访问(Spring Security 表单登录 + BCrypt,不自己写加密) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
         <!-- 重试(AOP 切面式) -->
         <dependency>
             <groupId>org.springframework.retry</groupId>

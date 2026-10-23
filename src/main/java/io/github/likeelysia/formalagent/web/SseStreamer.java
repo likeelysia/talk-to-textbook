@@ -3,16 +3,21 @@ package io.github.likeelysia.formalagent.web;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -38,11 +43,32 @@ public class SseStreamer {
     /** 心跳间隔(毫秒)。 */
     public static final long PING_INTERVAL_MS = 15_000;
 
-    private final ExecutorService workers;
+    private final ThreadPoolExecutor workers;
     private final ScheduledExecutorService pinger;
 
+    /** 同时跑的流式问答上限;超出的排队,队列满直接拒绝(小机器别让无限线程把内存吃光)。 */
+    @Value("${fa.stream.workers:4}")
+    private int streamWorkers = 4;
+
+    /** 排队上限;满了直接回"服务繁忙",而不是无限堆任务。 */
+    @Value("${fa.stream.queue:8}")
+    private int streamQueue = 8;
+
     public SseStreamer() {
-        this.workers = Executors.newCachedThreadPool(daemonThreads("agent-stream-"));
+        this(4, 8);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SseStreamer(@Value("${fa.stream.workers:4}") int streamWorkers,
+                       @Value("${fa.stream.queue:8}") int streamQueue) {
+        this.streamWorkers = Math.max(1, streamWorkers);
+        this.streamQueue = Math.max(1, streamQueue);
+        this.workers = new ThreadPoolExecutor(
+                this.streamWorkers, this.streamWorkers,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(this.streamQueue),
+                daemonThreads("agent-stream-"),
+                new ThreadPoolExecutor.AbortPolicy());
         this.pinger = Executors.newSingleThreadScheduledExecutor(daemonThreads("sse-ping-"));
     }
 
@@ -55,7 +81,11 @@ public class SseStreamer {
                 () -> quiet(() -> emitter.send(SseEmitter.event().comment("ping"))),
                 PING_INTERVAL_MS, PING_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
-        workers.execute(() -> {
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+        Runnable task = () -> {
+            if (requestId != null && !requestId.isBlank()) {
+                MDC.put(RequestIdFilter.MDC_KEY, requestId);
+            }
             try {
                 work.accept(emitter);
             } catch (StreamClosedException e) {
@@ -67,8 +97,18 @@ public class SseStreamer {
             } finally {
                 heartbeat.cancel(false);
                 quiet(emitter::complete);
+                MDC.remove(RequestIdFilter.MDC_KEY);
             }
-        });
+        };
+        try {
+            workers.execute(task);
+        } catch (RejectedExecutionException e) {
+            heartbeat.cancel(false);
+            log.warn("流式问答排队已满(workers={}, queue={}),拒绝新请求", streamWorkers, streamQueue);
+            quiet(() -> sendEvent(emitter, "error",
+                    Map.of("message", "当前请求较多,请稍后再试")));
+            quiet(emitter::complete);
+        }
     }
 
     /**

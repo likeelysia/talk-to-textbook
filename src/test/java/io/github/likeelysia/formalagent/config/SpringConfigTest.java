@@ -24,7 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * —— 这样才会真正加载 {@code application.yml}(手动上下文读不到 Boot 的配置文件)。
  * 用 {@code properties} 把交互式 CLI 关掉,免得它来抢 stdin。
  */
-@SpringBootTest(properties = "fa.cli.enabled=false")
+@SpringBootTest(properties = {"fa.cli.enabled=false", "fa.auth.password=test-password"})
 class SpringConfigTest {
 
     @Autowired ObjectMapper mapper;

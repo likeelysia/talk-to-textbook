@@ -6,6 +6,7 @@ import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.service.AssistantService;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -63,7 +64,11 @@ public class AgentStreamController {
         String conversationId = conversations.requireExisting(req.conversationId());
 
         SseEmitter emitter = newEmitter();
-        streams.start(emitter, out -> pipe(out, conversationId, req.question()));
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        emitter.onCompletion(() -> cancelled.set(true));
+        emitter.onTimeout(() -> cancelled.set(true));
+        emitter.onError(error -> cancelled.set(true));
+        streams.start(emitter, out -> pipe(out, conversationId, req.question(), cancelled));
         return emitter;
     }
 
@@ -77,7 +82,7 @@ public class AgentStreamController {
     }
 
     /** 真正的推送:把 StreamSink 的三个动作翻译成 SSE 事件,结束时补一条 done。 */
-    private void pipe(SseEmitter out, String conversationId, String question) {
+    private void pipe(SseEmitter out, String conversationId, String question, AtomicBoolean cancelled) {
         SseStreamer.sendEvent(out, "meta", Map.of("conversationId", conversationId));
 
         AssistantService.Turn turn = assistant.askStream(conversationId, question, question, new StreamSink() {
@@ -94,6 +99,11 @@ public class AgentStreamController {
             @Override
             public void onStatus(String text) {
                 SseStreamer.sendEvent(out, "status", Map.of("text", text));
+            }
+
+            @Override
+            public boolean isCancelled() {
+                return cancelled.get();
             }
         });
 

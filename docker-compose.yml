@@ -1,0 +1,70 @@
+# ============================================================================
+#  单用户受控部署:app + 本地 embedding + 可选 Nginx
+#  1) cp .env.example .env 并填好凭据
+#  2) 把 bge-m3 GGUF 放到 ./models/
+#  3) docker compose up -d --build
+#  4) 只有本机 127.0.0.1:8080 可直接访问;对外走 Nginx profile
+# ============================================================================
+
+services:
+  app:
+    build:
+      context: .
+    image: talk-to-textbook:local
+    env_file:
+      - .env
+    environment:
+      # 本地 embedding 容器;用云端服务就在 .env 里改 FA_EMBEDDING_URL
+      FA_EMBEDDING_URL: ${FA_EMBEDDING_URL:-http://embedding:8090}
+    ports:
+      # 只绑本机回环:公网必须经过 Nginx,不能绕过代理直连后端
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # 程序与数据分离;更新镜像不会覆盖这些目录
+      - ./knowledge:/app/knowledge
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+      - ./logs:/app/logs
+      - ./dict:/app/dict
+    mem_limit: ${APP_MEM_LIMIT:-2g}
+    restart: unless-stopped
+    depends_on:
+      embedding:
+        condition: service_started
+
+  embedding:
+    # 本地 llama.cpp server;GPU 镜像/外部 embedding 服务可替换
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    command:
+      - "-m"
+      - "${LLAMA_MODEL:-/models/bge-m3-Q8_0.gguf}"
+      - "--embeddings"
+      - "--pooling"
+      - "cls"
+      - "-c"
+      - "512"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8090"
+      - "-t"
+      - "${LLAMA_THREADS:-4}"
+    volumes:
+      - ./models:/models:ro
+    expose:
+      - "8090"
+    mem_limit: ${EMBEDDING_MEM_LIMIT:-3g}
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped

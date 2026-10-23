@@ -3,6 +3,7 @@ package io.github.likeelysia.formalagent.agent;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.exception.AgentException;
+import io.github.likeelysia.formalagent.exception.OverloadedException;
 import io.github.likeelysia.formalagent.llm.LlmClient;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import io.github.likeelysia.formalagent.llm.dto.AssistantTurn;
@@ -13,8 +14,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -50,10 +54,20 @@ public class AgentService {
     private final LlmClient llm;
     private final ObjectMapper mapper;
     private final Map<String, Tool> tools = new LinkedHashMap<>();
+    /** 同时最多几个"整轮问答"在调模型;超出的等一会儿,再不行就明确拒绝。 */
+    private final Semaphore modelSlots;
 
+    /** 测试 / 手工装配用:默认最多 2 个并发模型请求。 */
     public AgentService(LlmClient llm, List<Tool> tools, ObjectMapper mapper) {
+        this(llm, tools, mapper, 2);
+    }
+
+    @Autowired
+    public AgentService(LlmClient llm, List<Tool> tools, ObjectMapper mapper,
+                        @Value("${fa.model.max-concurrent:2}") int maxConcurrent) {
         this.llm = llm;
         this.mapper = mapper;
+        this.modelSlots = new Semaphore(Math.max(1, maxConcurrent));
         for (Tool tool : tools) {
             this.tools.put(tool.name(), tool);
         }
@@ -91,8 +105,27 @@ public class AgentService {
         AssistantTurn next(List<AgentMessage> messages, List<ToolDefinition> definitions);
     }
 
-    /** ReAct 主循环:流式与非流式共用这一份;{@code sink} 为 null 表示不流式。 */
+    /** 资源闸门:最多 N 个整轮问答同时调模型,等不到就明确拒绝。 */
     private AgentResult loop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
+        boolean acquired;
+        try {
+            acquired = modelSlots.tryAcquire(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new OverloadedException("等待模型并发名额时被中断，请稍后重试");
+        }
+        if (!acquired) {
+            throw new OverloadedException("当前提问较多，模型正在忙，请稍后重试");
+        }
+        try {
+            return doLoop(question, history, sink, source);
+        } finally {
+            modelSlots.release();
+        }
+    }
+
+    /** ReAct 主循环:流式与非流式共用这一份;{@code sink} 为 null 表示不流式。 */
+    private AgentResult doLoop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
         if (question == null || question.isBlank()) {
             throw new AgentException("问题不能为空");
         }
@@ -108,17 +141,20 @@ public class AgentService {
         List<String> trace = new ArrayList<>();
 
         for (int step = 1; step <= MAX_STEPS; step++) {
+            checkCancelled(sink);
             AssistantTurn turn = source.next(messages, definitions);
             if (!turn.wantsTools()) {                                  // 不需要工具 → 这就是最终答案
                 return new AgentResult(turn.content() == null ? "" : turn.content(), trace, step);
             }
 
             // 它其实是要调工具 —— 刚才那半句"我查一下…"不是答案,作废重来
+            checkCancelled(sink);
             if (sink != null) {
                 sink.onReset();
             }
             messages.add(AgentMessage.assistantWithTools(turn.toolCalls()));
             for (ToolCall call : turn.toolCalls()) {
+                checkCancelled(sink);
                 String name = call.function() == null ? "?" : call.function().name();
                 String rawArgs = call.function() == null ? "" : call.function().arguments();
                 if (sink != null) {
@@ -153,6 +189,12 @@ public class AgentService {
             return tool.execute(args);
         } catch (Exception e) {
             return "工具执行失败:" + e.getMessage();
+        }
+    }
+
+    private static void checkCancelled(StreamSink sink) {
+        if (sink != null && sink.isCancelled()) {
+            throw new AgentException("客户端已取消本次生成");
         }
     }
 

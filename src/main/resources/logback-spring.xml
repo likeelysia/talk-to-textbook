@@ -8,7 +8,7 @@
 <configuration>
 
     <property name="LOG_DIR" value="logs"/>
-    <property name="PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"/>
+    <property name="PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId:-}] [%thread] %logger{36} - %msg%n"/>
 
     <!-- 控制台 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">

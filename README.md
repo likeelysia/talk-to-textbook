@@ -71,7 +71,7 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
   每 `fa.extract.block-size` 页(默认 40)落一次盘,**重跑同一条命令即从上一块续**;`IngestMain --progress` 看灌到哪、`--restart` 推倒重来。
   OCR 单页失败(限流/图糊)会**记下页号**,下次跑先补灌这几页 —— 不会静默丢页
 - **Prompt 模板外置**:文案在 `resources/prompts/*.txt`
-- **网页前端**:内置单页问答界面(`http://localhost:8080/`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库;
+- **网页前端**:首页(`http://localhost:8080/`)为「灯下」暖光书桌欢迎页，带双页翻动、灯绳开关、重播和静心模式；点击「开始学习」进入问答工作台(`/study.html`)—— 文字提问 / 一次最多选 10 张图(缩略图可逐张删除,上传前自动压图)/ 看知识库;
   界面是**固定视口高度的“应用外壳”**:页面本身不滚,滚轮落在哪儿就滚哪儿(聊天记录 / 对话列表 / 知识库),
   不会“一滚滚走整页”、也不留大片空白(只有窄屏 `<=860px` 堆成一列装不下时,才改回整页滚);
   重命名 / 删除对话走页面内的白底对话框(不是浏览器原生 `prompt`/`confirm`);
@@ -169,7 +169,9 @@ java -jar target/talk-to-textbook-0.1.0-SNAPSHOT.jar --spring.profiles.active=de
 
 也可以在 IDEA 里直接运行 `TalkToTextbookApplication`(绿色 ▶)。
 
-启动后浏览器打开 <http://localhost:8080/> —— 就是网页问答界面。
+启动后浏览器打开 <http://localhost:8080/>，在「灯下」首页点击「开始学习」进入问答工作台。也可直接打开 <http://localhost:8080/study.html>。
+
+欢迎页不是账号认证页，不要求填写称呼；原有会话、记忆、笔记及 API 保持原样。动画和插画使用本地 CSS、SVG 与原生 JavaScript，无需额外安装前端依赖；支持系统减少动态效果设置。
 
 ### 命令行怎么用(需 `--fa.cli.enabled=true`)
 
@@ -295,14 +297,16 @@ src/main/java/io/github/likeelysia/formalagent/
 └── store/      # SessionStore —— 存档 / 读档 / 导出
 
 src/main/resources/static/
-├── index.html / style.css / app.js   # 单页问答界面(原生 JS,无框架)
+├── index.html / welcome.css / welcome.js  # 灯下欢迎页(暖光、双页翻动)
+├── study.html / style.css / app.js        # 问答工作台(原生 JS,无框架)
 └── vendor/     # 本地第三方库(离线可用,不走 CDN)
     ├── katex/  # 公式排版(katex.min.js + css + fonts/*.woff2)
     └── marked.min.js                 # Markdown 解析
 ```
 
 配置在 `src/main/resources/application.yml`(前缀 `fa.*`);
-前端页面在 `src/main/resources/static/`(`index.html` / `app.js` / `style.css`,
+前端页面在 `src/main/resources/static/`(欢迎页 `index.html` / `welcome.css` / `welcome.js`，
+问答工作台 `study.html` / `app.js` / `style.css`,
 联系页 `contact.html` + 二维码 `img/wechat.jpg`);
 提示词在 `src/main/resources/prompts/`。
 

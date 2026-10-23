@@ -23,4 +23,15 @@ public interface StreamSink {
     /** 状态提示(例如"正在查资料")。默认什么都不做,不关心过程就别实现。 */
     default void onStatus(String text) {
     }
+
+    /**
+     * 客户端是否已经取消/断开。
+     *
+     * <p>默认 false;SSE 实现可以在连接关闭时置 true,Agent 在每一步之间检查,
+     * 已经断开就尽早停手。注意:正在进行中的一次模型 HTTP 请求无法被强行打断,
+     * 只能等它返回后不再继续下一步 —— 这是当前实现的能力边界。
+     */
+    default boolean isCancelled() {
+        return false;
+    }
 }

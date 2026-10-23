@@ -1,166 +1,73 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Talk to Textbook · 教材问答</title>
-    <link rel="stylesheet" href="/style.css">
-    <!-- 公式(KaTeX)+ 样式,和字体一起放在本地,断网也能用 -->
-    <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#171c19">
+<title>灯下 · Talk to Textbook</title>
+<link rel="stylesheet" href="/welcome.css">
 </head>
 <body>
-
-<header>
-    <h1>📘 Talk to Textbook</h1>
-    <p class="sub">把教材变成「会自己查资料」的问答助手</p>
-</header>
-
+<div class="shell">
+<header><div class="brand"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M9 26c5-2 8-1 11 2 3-3 6-4 11-2V12c-5-1-8 0-11 3-3-3-6-4-11-3z" stroke="#d6bb81" stroke-width="1.4"/><path d="M20 15v13M6 29c6-2 10-1 14 2 4-3 8-4 14-2M20 4v4M9 5l3 4M31 5l-3 4" stroke="#d6bb81" stroke-width="1.2"/></svg><div>灯下<div class="edition">A LITTLE LIGHT TO LEARN</div></div></div><div class="top-note"><span class="dot"></span>留一盏灯，给好奇的你</div></header>
 <main>
-    <!-- ==================== 会话栏 ==================== -->
-    <aside class="convs card">
-        <div class="convs-head">
-            <h2>对话</h2>
-            <button id="newConv" type="button" class="mini new" title="新建一个对话(记忆独立)">＋ 新建</button>
-        </div>
-        <div id="convList" class="conv-list">加载中…</div>
-        <button id="openMemory" type="button" class="mini mem-btn" title="看看这个对话记住了什么">🧠 记忆</button>
-        <button id="openNotebook" type="button" class="mini mem-btn" title="看存下来的提问和 AI 的相关回答">📒 笔记本</button>
-        <p class="conv-note muted small">每个对话的记忆互相独立。</p>
-    </aside>
-
-    <!-- ==================== 对话区 ==================== -->
-    <section class="card chat">
-        <div id="messages" class="messages">
-            <div class="bubble bot">
-                你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。每个对话各自独立记忆,想另起一个话题就点左上角「＋ 新建」。
-            </div>
-        </div>
-
-        <!-- 已选图片的缩略图区:每张右上角的 × 可以自己删掉 -->
-        <div id="previews" class="previews" hidden>
-            <div id="thumbs" class="thumbs"></div>
-            <div class="preview-bar">
-                <span id="imgCount" class="muted small">0 / 10</span>
-                <span id="previewMsg" class="hint"></span>
-                <button id="clearImages" type="button" class="link-btn">清空全部</button>
-            </div>
-        </div>
-
-        <form id="ask-form" class="composer">
-            <input id="question" type="text" placeholder="例如:沿闭合曲线跑一圈回到原点,位移是多少?" autocomplete="off">
-            <label class="icon-btn" id="pickLabel" title="上传图片提问(最多 10 张)">
-                🖼️<input id="images" type="file" accept="image/*" multiple hidden>
-            </label>
-            <button id="noteBtn" type="button" class="ghost" title="勾选你问过的问题,存进笔记本">📝 存笔记</button>
-            <button id="noteSave" type="button" hidden>保存 (0)</button>
-            <button id="send" type="submit">提问</button>
-            <button id="stop" type="button" class="ghost" hidden title="停止生成">停止</button>
-        </form>
-    </section>
-
-    <!-- ==================== 侧栏 ==================== -->
-    <aside class="side">
-        <div class="card">
-            <h2>知识库</h2>
-            <div id="kb" class="muted">加载中…</div>
-        </div>
-
-        <div class="card contact-cta">
-            <p>没有找到教材?<a class="contact-btn" href="/contact.html">点击这里联系开发者</a></p>
-            <p class="vocab-cta"><a class="contact-btn vocab-btn" href="/vocab.html">📖 打开背词工具</a></p>
-        </div>
-    </aside>
+<section class="intro" aria-labelledby="welcome-title"><div class="eyebrow">YOUR QUIET CORNER OF CURIOSITY</div><h1 id="welcome-title">灯亮了，<br>让知识<em>慢慢亮起来。</em></h1><p class="subtitle">把今天的疑问，变成明天的掌握。<br>从一页书、一个问题开始，找到自己的学习节奏。</p><div class="entrance"><a class="cta" id="start" href="/study.html">开始学习 <span aria-hidden="true">↗</span></a><p class="small-note">你的每一次好奇，都值得被记住。</p></div></section>
+<div class="scene">
+<svg viewBox="0 0 1000 800" role="img" aria-label="一盏暖色台灯照亮褐色木桌，书页翻开，数学函数、物理和化学公式从书中缓缓浮现。">
+<defs>
+<radialGradient id="ambient"><stop stop-color="#d3aa58" stop-opacity=".19"/><stop offset="1" stop-color="#d3aa58" stop-opacity="0"/></radialGradient>
+<linearGradient id="beam" x1=".6" y1="0" x2=".5" y2="1"><stop stop-color="#ffdc8c" stop-opacity=".20"/><stop offset=".8" stop-color="#f5cb7c" stop-opacity=".025"/><stop offset="1" stop-color="#f5cb7c" stop-opacity="0"/></linearGradient>
+<radialGradient id="pool"><stop stop-color="#dfac5a" stop-opacity=".32"/><stop offset="1" stop-color="#e1ad60" stop-opacity="0"/></radialGradient>
+<linearGradient id="desk" x2="0" y2="1"><stop stop-color="#795538"/><stop offset=".45" stop-color="#503c2b"/><stop offset="1" stop-color="#31291f"/></linearGradient>
+<linearGradient id="deskEdge" x2="0" y2="1"><stop stop-color="#826041"/><stop offset=".2" stop-color="#483323"/><stop offset="1" stop-color="#29241c"/></linearGradient>
+<linearGradient id="green"><stop stop-color="#1c3028"/><stop offset=".45" stop-color="#52604a"/><stop offset="1" stop-color="#233b2d"/></linearGradient>
+<linearGradient id="brass"><stop stop-color="#625039"/><stop offset=".4" stop-color="#d3b87e"/><stop offset=".65" stop-color="#8e794f"/><stop offset="1" stop-color="#433c2e"/></linearGradient>
+<linearGradient id="leftPaper"><stop stop-color="#baab88"/><stop offset=".15" stop-color="#e5d6ae"/><stop offset=".7" stop-color="#f4e7c6"/><stop offset="1" stop-color="#cabb98"/></linearGradient>
+<linearGradient id="rightPaper"><stop stop-color="#a69a79"/><stop offset=".15" stop-color="#f0e2bf"/><stop offset=".7" stop-color="#e7d8b4"/><stop offset="1" stop-color="#c4b28c"/></linearGradient>
+<filter id="blur"><feGaussianBlur stdDeviation="19"/></filter><filter id="shadow"><feGaussianBlur stdDeviation="10"/></filter>
+<pattern id="wood" width="350" height="30" patternUnits="userSpaceOnUse" patternTransform="rotate(-6)"><path d="M0 4Q70 0 150 5T350 4M0 16Q100 8 200 18T350 16M25 26Q140 20 300 27" stroke="#c99b66" stroke-width=".6" opacity=".12" fill="none"/></pattern>
+</defs>
+<!-- Light and room -->
+<ellipse class="light" cx="617" cy="370" rx="395" ry="365" fill="url(#ambient)"/>
+<path d="M142 595V168h130v401M156 168v-30h130v427" stroke="#8b9372" opacity=".07" fill="none"/>
+<path class="light" d="M620 255 315 661 923 622 769 247Z" fill="url(#beam)"/>
+<!-- Solid wood tabletop -->
+<g class="ground"><path d="m72 602 594-99 306 121-570 140L72 649Z" fill="url(#deskEdge)"/><path d="m72 602 594-99 306 121-570 116Z" fill="url(#desk)"/><path d="m72 602 594-99 306 121-570 116Z" fill="url(#wood)"/><path d="m73 604 328 138 570-118" stroke="#c29a66" opacity=".25" fill="none"/><path d="m206 658 578-110M327 710l571-119" stroke="#231b16" opacity=".2" fill="none"/><ellipse class="light" cx="631" cy="614" rx="279" ry="80" fill="url(#pool)"/><ellipse cx="531" cy="650" rx="224" ry="39" fill="#0c110e" opacity=".5" filter="url(#shadow)"/></g>
+<!-- Lamp foot and brass arm -->
+<ellipse cx="805" cy="591" rx="79" ry="25" fill="#0b120d" opacity=".6" filter="url(#shadow)"/>
+<path d="M741 576q64-35 122-1v17q-64 30-122 0Z" fill="#192c22"/><ellipse cx="802" cy="575" rx="61" ry="20" fill="url(#green)"/><ellipse cx="802" cy="573" rx="40" ry="11" fill="#7b8055" opacity=".18"/>
+<path d="M804 570V350q0-40-25-62l-66-69" fill="none" stroke="#1a231c" stroke-width="15"/><path d="M800 567V350q0-40-25-62l-66-69" fill="none" stroke="url(#brass)" stroke-width="9"/><circle cx="800" cy="358" r="12" fill="#81724c"/><circle cx="800" cy="358" r="6" fill="#b4a075"/>
+<!-- Lamp shade -->
+<path d="M627 233q6-80 64-85 60 3 76 79l17 19q-76 42-174 5Z" fill="url(#green)"/><path d="M630 228q12-66 58-72" stroke="#8e9d6d" stroke-width="2" opacity=".23" fill="none"/><ellipse cx="696" cy="246" rx="88" ry="17" fill="#141e15"/><ellipse class="bulb" cx="696" cy="247" rx="78" ry="11" fill="#efd499"/><ellipse class="light" cx="696" cy="251" rx="68" ry="15" fill="#ffdd91" opacity=".7" filter="url(#blur)"/><path d="M608 245q83 33 177-1" stroke="#a5a47b" stroke-width="3" fill="none"/>
+<g class="lamp-control" tabindex="0" role="button" aria-label="拉动灯绳，开关台灯" aria-pressed="true"><title>点击灯绳，开 / 关灯</title><rect x="719" y="264" width="46" height="112" fill="transparent"/><g class="pull"><path d="M740 255v83" stroke="#b69c61" stroke-width="1.5" stroke-dasharray="2 2"/><ellipse class="pull-knob" cx="740" cy="344" rx="5" ry="9" fill="#c5a76a"/></g></g>
+<!-- Book cover, page block, binding -->
+<path d="M302 554Q413 530 520 580Q627 530 738 554L738 675Q622 660 520 710Q418 660 302 675Z" fill="#243e33" stroke="#6b7657" stroke-width="1.2"/>
+<path d="M308 558Q416 537 520 582Q624 537 732 558L732 670C656 657 584 669 520 702C456 669 384 657 308 670Z" fill="#b4a07b"/>
+<g fill="none" stroke="#796c52" opacity=".55" stroke-width="1"><path d="M310 665C382 652 455 664 520 695C585 664 658 652 730 665M310 669C382 656 455 668 520 699C585 668 658 656 730 669"/></g>
+<path d="M520 582V701" stroke="#998b68" stroke-width="5" fill="none"/>
+<path d="M515 695q4 21-2 35l10-6 9 6q-9-21-7-35Z" fill="#a05e42"/>
+<g class="book-open"><path d="M310 552C382 537 455 548 520 578L520 690C455 660 382 649 310 662Z" fill="url(#leftPaper)"/><path d="M310 552C382 537 455 548 520 578M310 662C382 649 455 660 520 690" stroke="#f6edcf" fill="none" opacity=".7"/>
+<g stroke="#9c9477" opacity=".45" fill="none" stroke-width="1.3"><path d="M338 576Q414 570 490 598M338 587Q414 581 490 609M338 598Q414 592 490 620M338 609Q402 604 457 621"/><path d="M362 560Q403 560 446 571" stroke-width="3"/></g><g transform="translate(351 633) rotate(7)" fill="#7d7d64" font-family="Georgia,serif"><text font-size="14">f(x) = x²</text><text y="15" font-size="8">A question is a beginning.</text></g></g>
+<path d="M730 552C658 537 585 548 520 578L520 690C585 660 658 649 730 662Z" fill="url(#rightPaper)"/>
+<path d="M730 552C658 537 585 548 520 578M730 662C658 649 585 660 520 690" stroke="#fff1cc" fill="none" opacity=".6"/>
+<g stroke="#a59b7a" opacity=".55" stroke-width="1.1" fill="none"><path d="M702 576Q626 570 550 598M702 587Q626 581 550 609M702 598Q626 592 550 620M702 609Q638 604 583 621"/><path d="m610 638 22-17 27 11-22 17Zm22-17v17m-22 0 27 11m0-17-5 6"/></g><path d="M520 580V688" stroke="#8c8162" stroke-width="1.2"/>
+<g class="turning-page" visibility="hidden" aria-hidden="true">
+<path id="leaf-paper" fill="url(#rightPaper)" stroke="#f4e5c2" stroke-width=".7"/>
+<path id="leaf-lines" stroke="#9c9477" opacity=".45" stroke-width="1.2" fill="none"/>
+<path id="leaf-edge" stroke="#fff3d5" stroke-width=".9" opacity=".65" fill="none"/>
+</g>
+<!-- A pencil and a quiet cup -->
+<path d="m722 675 74-23" stroke="#151c14" stroke-width="7" opacity=".35"/><path d="m722 671 70-23" stroke="#b6985e" stroke-width="5"/><path d="m792 648 10-4-8 8" fill="#dac5a0"/><path d="m799 646 3-2-1 3" fill="#252c20"/>
+<ellipse cx="226" cy="596" rx="38" ry="12" fill="#0c160f" opacity=".4"/><path d="M237 552q34-8 28 18-6 16-24 11" fill="none" stroke="#6e755e" stroke-width="8"/><path d="M198 547h48l-4 39q-21 13-40 0Z" fill="#7c8267"/><ellipse cx="222" cy="547" rx="24" ry="8" fill="#a0a388"/><ellipse cx="222" cy="548" rx="19" ry="5" fill="#3b3024"/><path d="M218 531q-12-14 1-26t-2-22" stroke="#b3b5a0" stroke-width="1.5" fill="none" opacity=".18"/>
+<!-- Ideas emerging from the open book -->
+<g class="formula" style="--delay:2.3s"><g class="float" fill="#e9d29f" font-family="Georgia,serif"><text x="379" y="405" font-size="37" transform="rotate(-9 379 405)">E = mc<tspan baseline-shift="super" font-size="22">2</tspan></text><text x="388" y="426" font-family="sans-serif" font-size="8" letter-spacing="3" opacity=".45">EVERYTHING IS CONNECTED</text></g></g>
+<g class="formula" style="--delay:2.65s"><g class="float" style="--drift:-2s"><path d="M546 463h113M565 481V390" stroke="#b5b78a" stroke-width="1" opacity=".6"/><path d="M565 453q38 5 74-56" stroke="#dfc487" stroke-width="1.8" fill="none"/><path d="m638 397 1-7 4 5" stroke="#dfc487" fill="none"/><text x="592" y="476" fill="#c7c391" font-size="16" font-family="Georgia,serif" font-style="italic">f(x)</text><circle cx="613" cy="433" r="3" fill="#e5c98f"/><path d="M613 433v30" stroke="#a6ad81" stroke-dasharray="3 4" opacity=".4"/></g></g>
+<g class="formula" style="--delay:2.9s"><g class="float" style="--drift:-4s" stroke="#d7ba82" fill="none" stroke-width="1.3" opacity=".8"><path d="m451 486 23-14 23 14v27l-23 14-23-14Zm5 3v21m18 11 17-10m-17-33 17 10M497 486l20-12M451 513l-18 11"/><text x="516" y="477" stroke="none" fill="#d7ba82" font-size="14" font-family="Georgia,serif">OH</text></g></g>
+<g class="formula" style="--delay:3s" fill="#c3ba93" font-family="Georgia,serif" font-style="italic" opacity=".6"><text x="337" y="492" font-size="20">∫</text><text x="351" y="491" font-size="15">x dx</text><text x="565" y="332" font-size="17">∞</text></g>
+<g class="light" fill="#f7d89b"><circle class="dust" cx="397" cy="534" r="1.7"/><circle class="dust" cx="533" cy="386" r="1.6" style="animation-delay:-2s"/><circle class="dust" cx="667" cy="344" r="1.4"/><circle class="dust" cx="573" cy="517" r="2" style="animation-delay:-3s"/><circle class="dust" cx="331" cy="439" r="1"/><circle class="dust" cx="473" cy="343" r="1.3"/><path d="M537 484v8m-4-4h8M358 358v7m-3.5-3.5h7" stroke="#dec58f" stroke-width="1" opacity=".5"/></g>
+</svg><div class="scene-note">a little light, a world of possibilities.</div></div>
 </main>
-
-<!-- ==================== 长期记忆抽屉 ==================== -->
-<div id="memoryModal" class="modal" hidden>
-    <div class="modal-box card">
-        <div class="modal-head">
-            <h2>🧠 这个对话记住的事</h2>
-            <button id="closeMemory" type="button" class="mini">关闭</button>
-        </div>
-        <p class="mem-tip muted small">
-            助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标了 📌 的不会被自动清理(满了先淘汰最久没用到的那条)。
-        </p>
-        <div class="mem-core">
-            <div class="mem-core-head">
-                <strong>📌 核心档案</strong>
-                <span class="muted small">每轮都带(约 300–500 token)</span>
-            </div>
-            <textarea id="coreText" rows="6" placeholder="我是谁 / 长期目标 / 当前项目 / 沟通偏好...&#10;例如:我叫鹏哥,在准备 Java 实习面试;回答要给出处;习惯国际单位制。"></textarea>
-            <div class="mem-core-foot">
-                <span id="coreCount" class="muted small"></span>
-                <button id="coreSave" type="button" class="mini">保存核心档案</button>
-            </div>
-        </div>
-        <div id="memConflicts" class="mem-conflicts" hidden>
-            <div class="mem-conflict-head">⚠️ 与核心档案冲突 <span id="memConflictCount"></span></div>
-            <div id="memConflictList"></div>
-        </div>
-        <div class="mem-scope">
-            <label for="memScope">🔗 记忆域:</label>
-            <select id="memScope"></select>
-        </div>
-        <p id="memScopeHint" class="muted small mem-scope-hint"></p>
-        <div class="mem-add">
-            <input id="memText" type="text" placeholder="手动记住一件事,例如:我叫鹏哥,在准备 Java 实习面试" autocomplete="off">
-            <button id="memAdd" type="button">记住</button>
-        </div>
-        <label class="mem-history"><input type="checkbox" id="memHistory"> 显示历史(已覆盖 / 已删除)</label>
-        <div id="memList" class="mem-list">加载中…</div>
-        <div class="mem-foot">
-            <button id="memExport" type="button" class="mini">导出 JSON</button>
-            <button id="memForgetAll" type="button" class="mini danger">忘掉全部</button>
-        </div>
-    </div>
+<footer><div class="footer-left"><span class="footer-line"></span><span>不必一下子看懂整个世界。</span></div><span class="label">A SPACE FOR YOUR NEXT AHA MOMENT</span><div class="actions"><button class="text-button" id="replay"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor"><path d="M4 7a7 7 0 1 1 0 7M4 2v5h5" stroke-width="1.5"/></svg>重播开场</button><button class="text-button" id="motion" aria-pressed="false">静心模式</button></div></footer>
 </div>
-
-<!-- ==================== 笔记本(存下来的提问)==================== -->
-<div id="notebookModal" class="modal" hidden>
-    <div class="modal-box card">
-        <div class="modal-head">
-            <h2>📒 笔记本</h2>
-            <button id="closeNotebook" type="button" class="mini">关闭</button>
-        </div>
-        <p class="muted small">
-            你存下来的提问(跨对话汇总)。点一条,看它和 AI 的相关回答。
-        </p>
-        <div id="noteList" class="note-list">加载中…</div>
-        <div class="mem-foot">
-            <button id="noteExport" type="button" class="mini">导出 JSON</button>
-        </div>
-    </div>
-</div>
-
-<!-- ==================== 笔记详情 ==================== -->
-<div id="noteModal" class="modal" hidden>
-    <div class="modal-box card">
-        <div class="modal-head">
-            <h2>📄 笔记</h2>
-            <button id="closeNote" type="button" class="mini">关闭</button>
-        </div>
-        <div id="noteDetail" class="note-detail">加载中…</div>
-    </div>
-</div>
-
-<!-- ==================== 通用对话框(重命名 / 删除确认) ==================== -->
-<div id="uiModal" class="modal" hidden>
-    <div class="modal-box card ui-box">
-        <div class="modal-head">
-            <h2 id="uiTitle">标题</h2>
-            <button id="uiClose" type="button" class="mini">关闭</button>
-        </div>
-        <p id="uiText" class="ui-text muted small" hidden></p>
-        <input id="uiInput" type="text" maxlength="40" autocomplete="off" hidden>
-        <div class="ui-foot">
-            <button id="uiCancel" type="button" class="mini">取消</button>
-            <button id="uiOk" type="button">确定</button>
-        </div>
-    </div>
-</div>
-
-<script src="/vendor/katex/katex.min.js"></script>
-<script src="/vendor/marked.min.js"></script>
-<script src="/app.js"></script>
+<script src="/welcome.js" defer></script>
 </body>
 </html>

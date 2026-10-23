@@ -1,0 +1,151 @@
+/* 灯下内部主题：只负责呈现，沿用原控件、请求与存储逻辑。 */
+:root {
+    color-scheme: light;
+    --bg: #ece8de;
+    --card: #fffdf7;
+    --line: #ded8c9;
+    --text: #303b32;
+    --muted: #737767;
+    --brand: #42604c;
+    --brand-dark: #294432;
+    --user: #3d5947;
+    --bot: #f4f0e6;
+    --error: #ac4940;
+    --brand1: #42604c;
+    --brand2: #a18047;
+    --ink: #303b32;
+}
+body {
+    background: radial-gradient(ellipse at 80% 0%, #f8efda 0, transparent 55%), var(--bg);
+    color: var(--text);
+}
+button, input, textarea, select { font-family: inherit; }
+button, .card, input, textarea, .contact-btn { border-radius: 8px; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: 2px solid #9f793d; outline-offset: 3px;
+}
+::selection { background: #e5d4ab; color: #243c2b; }
+* { scrollbar-color: #b9bba7 transparent; scrollbar-width: thin; }
+.study-page > header {
+    width: min(1520px, 100%); max-width: none; padding: 25px 32px 18px;
+    display: flex; justify-content: space-between; align-items: center; gap: 20px;
+}
+.study-page header h1 { font: 26px/1.2 "SimSun", serif; font-weight: 400; letter-spacing: 4px; }
+.study-page .home-brand { display: inline-flex; align-items: center; gap: 12px; }
+.brand-mark { width: 29px; height: 29px; color: #9b7842; }
+.study-page header .sub { font-size: 10px; letter-spacing: 2.5px; margin: 8px 0 0 41px; }
+.desk-motto { font-family: "SimSun", serif; font-size: 13px; color: #737767; letter-spacing: 2px; }
+.desk-motto::before { content: '✧'; color: #a98951; margin-right: 10px; }
+.desk-actions { display: flex; align-items: center; gap: 12px; }
+.logout-form { margin: 0; }
+.logout-form .mini { white-space: nowrap; }
+.study-page > main {
+    width: min(1520px, 100%); max-width: none; padding: 0 32px 26px;
+    grid-template-columns: 215px minmax(0, 1fr) 260px; gap: 18px;
+}
+.card { border-color: var(--line); box-shadow: 0 4px 20px #313a2310; }
+.convs.card {
+    background: #243c30; border-color: #243c30; color: #eee9d8;
+    padding: 22px 15px; gap: 15px;
+}
+.convs-head h2 { font-weight: 400; font-size: 14px; letter-spacing: 2px; }
+.convs .muted, .convs .conv-note { color: #bdc5b2; }
+.convs .conv-note { font-size: 11px; border-top: 1px solid #83947844; padding-top: 15px; }
+.convs .conv-item:hover { background: #ffffff0b; }
+.convs .conv-item.active { background: #516348; border-color: #91a07855; }
+.convs .conv-title, .convs .conv-item.active .conv-title { color: #f4eddb; }
+.convs .conv-title:hover { color: #eed29a; }
+.convs .mini { color: #dfdfc9; background: transparent; border-color: #9fae8c55; }
+.convs .mini:hover { background: #52654c; color: #fff5dc; }
+.convs .mini.new { background: #d7bd88; color: #2e3d2d; border-color: #d7bd88; }
+.convs .mini.new:hover { background: #ecd19d; }
+.convs .mem-btn { padding: 10px; text-align: left; }
+.convs .mini.danger:hover { background: var(--error); color: white; }
+.chat.card { padding: 0; overflow: hidden; }
+.desk-heading { padding: 20px 25px 16px; border-bottom: 1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.desk-heading h2 { font: 21px/1.4 "SimSun", serif; margin: 0; letter-spacing: 2px; }
+.desk-heading p { color: var(--muted); font-size: 11px; margin: 5px 0 0; }
+.desk-heading > span { color: #927546; font-size: 9px; letter-spacing: 2px; }
+.messages { padding: 24px; gap: 22px; }
+.bubble { font-size: 14px; line-height: 1.9; padding: 16px 19px; max-width: 92%; }
+.bubble.bot { background: #f4f0e6; border: 1px solid #e9e3d4; }
+.bubble.user { background: var(--user); color: #fffdf3; }
+.bubble.bot.error { background: #fae9e3; border-color: #e9c9bd; }
+.bubble .answer.rich blockquote { color: #6f715e; border-left-color: #bba477; }
+.bubble .answer.rich a { color: var(--brand-dark); text-decoration-color: #a69c72; }
+.bubble.user a { color: #f3dab0; }
+.trace code { background: #fffaf0; }
+.composer { margin: 0 20px; padding: 17px 0; flex-wrap: wrap; gap: 8px; }
+.composer input[type=text] { background: #fffdf8; min-width: 180px; color: var(--text); flex-basis: 180px; }
+.composer #send, #noteSave { background: #d6b780; color: #293d2c; }
+.composer #send:hover, #noteSave:hover { background: #e7c994; }
+.composer button.ghost { color: var(--brand); background: #f5f1e7; border-color: var(--line); }
+.composer button.ghost:hover { background: #eae7d9; }
+.composer #stop { color: var(--error); }
+.composer #noteBtn.active { background: var(--brand); color: white; }
+.icon-btn { background: #f7f3e9; flex-shrink: 0; }
+.previews { padding: 10px 24px 0; }
+.side .card { padding: 22px 19px; }
+.side h2 { font: 19px "SimSun", serif; letter-spacing: 2px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.stat b { color: #927244; font-family: Georgia, serif; font-weight: 400; font-size: 32px; }
+.contact-cta p { font-size: 12px; line-height: 1.9; }
+.contact-btn { white-space: normal; margin: 10px 0 0; display: block; text-align: center; background: #e9e4d6; color: #354f3d; border: 1px solid #d9d1bb; font-size: 12px; }
+.contact-btn:hover { background: #ded5bf; color: #293e30; }
+.vocab-btn { background: #3c5744; color: #fff5df; border-color: #3c5744; }
+.vocab-btn:hover { background: #294432; color: #fff5df; }
+.modal { background: #17271ed1; backdrop-filter: blur(5px); }
+.modal-box { border-radius: 12px; box-shadow: 0 20px 70px #14231a55; padding: 25px; }
+.modal-head h2 { font-family: "SimSun", serif; font-size: 21px; font-weight: 400; }
+.mem-core, .mem-item, .note-row { background: #f5f1e7; }
+.mem-core textarea, .mem-add input, .ui-box input[type=text], .mem-scope select { background: #fffdf7; color: var(--text); }
+.mini { background: #fffaf0; }
+button.danger { color: #fff; }
+.modal-box { overflow-y: auto; }
+.note-open:hover { background: #e9e7d9; }
+.note-q { color: var(--text); }
+.contact-page { background: #1e3026; }
+.contact-box { background: #faf5e8; box-shadow: 0 20px 70px #0e1d1555; padding: 36px; }
+.contact-box h1 { font: 26px "SimSun", serif; color: #3b513c; margin-bottom: 14px; }
+.vocab-page { background: radial-gradient(ellipse at top, #46543a, #1e3026 75%); color: var(--text); padding: 40px 24px; }
+.vocab-page .card { background: #fffdf7; border: 1px solid #dad4c1; box-shadow: 0 20px 70px #0e1d1544; padding: 32px; }
+.vocab-page h1 { font: 28px/1.5 "SimSun", serif; color: #364b39; letter-spacing: 2px; }
+.vocab-page .sub, .vocab-page .stats, .vocab-page .status, .vocab-page .footer { color: #727765; }
+.vocab-page textarea, .vocab-page .searchbar input { background: #faf7ef; color: #303b32; border: 1px solid #d8d2c2; }
+.vocab-page .btn-primary { background: #3d5947; }
+.vocab-page .btn-download { background: #d8ba84; color: #30412c; }
+.vocab-page .btn-mode { background: #e9e5d8; color: #3b513c; border: 1px solid #d9d2be; }
+.vocab-page .back-link, .vocab-page .stats b, .vocab-page .word, .vocab-page .entry-word { color: #3d5947; }
+.vocab-page .entry { background: #f3efe3; }
+.vocab-page .pos-label { color: #8b6b37; }
+.vocab-page th { background: #e9e6d7; color: #3c4d38; }
+.vocab-page th, .vocab-page td, .vocab-page .wrap { border-color: #ded8c9; }
+.vocab-page tr:nth-child(even) { background: #f6f2e8; }
+.vocab-page .confirm-mask { background: #17271ed1; backdrop-filter: blur(5px); }
+.vocab-page .confirm-box { background: #fffaf0; }
+@media (max-width: 1150px) and (min-width: 861px) {
+    .study-page > main { grid-template-columns: 190px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 27%); }
+    .side .card { padding: 12px 18px; }
+    .side h2 { margin-bottom: 6px; padding-bottom: 6px; font-size: 16px; }
+    .contact-btn { margin-top: 4px; padding: 5px 10px; }
+}
+@media (max-width: 860px) {
+    .study-page > header { padding: 22px 18px; }
+    .desk-motto { display: none; }
+    .study-page > main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; padding: 0 14px 22px; gap: 14px; }
+    .convs.card { padding: 15px; gap: 10px; }
+    .conv-list { max-height: 160px; }
+    .convs .conv-note { margin: 0; padding-top: 8px; }
+    .chat { min-height: 65vh; }
+    .desk-heading { padding: 17px; }
+    .desk-heading > span { display: none; }
+    .messages { padding: 16px; }
+    .composer { margin: 0 14px; }
+    .composer input[type=text] { flex-basis: 100%; }
+    .composer button { padding: 10px 12px; font-size: 13px; }
+    .modal { padding: 12px; }
+    .modal-box { padding: 17px; }
+    .vocab-page { padding: 16px 12px; }
+    .vocab-page .card { padding: 22px 16px; }
+    .vocab-page h1 { font-size: 24px; }
+    .vocab-page .btn { font-size: 13px; padding: 10px 13px; }
+}

@@ -67,3 +67,9 @@ secrets/
 
 ### 背词工具词典(851MB,本地外置,不入库)###
 /dict/
+
+### 部署:模型文件/备份/证书不入库
+/models/
+/backups/
+deploy/certs/*.pem
+deploy/certs/*.key

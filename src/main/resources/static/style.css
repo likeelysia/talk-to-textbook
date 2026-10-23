@@ -516,3 +516,8 @@ button.danger:hover { background: #b93b36; }
     .note-list { min-height: 40vh; max-height: 64vh; }
     .note-detail { min-height: 40vh; max-height: 66vh; }
 }
+
+/* Workbench brand links back to the welcome page. */
+.home-brand { color: inherit; text-decoration: none; }
+.home-brand:hover { color: var(--brand); }
+.home-brand:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; }

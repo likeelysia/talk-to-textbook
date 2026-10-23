@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>灯下 · 登录</title>
+<style>
+    :root { --ink:#17251d; --paper:#f6efdf; --gold:#b99356; --muted:#7d7464; }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: radial-gradient(circle at 50% 35%, #23382b 0, #121c15 55%, #0b120d 100%);
+        color: var(--ink); font-family: "Noto Serif SC", Georgia, "Songti SC", serif;
+    }
+    .card {
+        width: min(92vw, 380px); background: var(--paper); border-radius: 18px;
+        padding: 32px 30px 26px; box-shadow: 0 24px 80px rgba(0,0,0,.45);
+        border: 1px solid rgba(185,147,86,.45);
+    }
+    .brand { display:flex; align-items:center; gap:10px; color:#3b2f1f; font-size:20px; letter-spacing:.08em; }
+    .brand svg { width:30px; height:30px; }
+    h1 { font-size: 22px; margin: 20px 0 6px; font-weight: 600; }
+    p.sub { margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    label { display:block; font-size:12px; color:#6f624d; margin: 14px 0 6px; letter-spacing:.08em; }
+    input {
+        width:100%; padding: 11px 12px; border:1px solid #d8c9ad; border-radius:10px;
+        background:#fffaf0; color:var(--ink); font-size:15px; outline:none;
+    }
+    input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(185,147,86,.16); }
+    button {
+        width:100%; margin-top: 22px; padding: 12px; border:0; border-radius:10px;
+        background:#2b4a37; color:#f8f2e3; font-size:15px; letter-spacing:.12em; cursor:pointer;
+    }
+    button:hover { background:#203b2b; }
+    .error {
+        margin: 14px 0 0; padding: 9px 11px; border-radius:9px; font-size:13px;
+        background:#fbe9e5; color:#a23c2c; border:1px solid #ecc7be;
+    }
+    .foot { margin-top: 18px; display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+    a { color:#6d5632; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<main class="card">
+    <div class="brand">
+        <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <path d="M9 26c5-2 8-1 11 2 3-3 6-4 11-2V12c-5-1-8 0-11 3-3-3-6-4-11-3z" stroke="#b99356" stroke-width="1.4"/>
+            <path d="M20 15v13M6 29c6-2 10-1 14 2 4-3 8-4 14-2M20 4v4" stroke="#b99356" stroke-width="1.2"/>
+        </svg>
+        <span>灯下</span>
+    </div>
+    <h1>回到你的书桌</h1>
+    <p class="sub">这是私人学习空间。登录后继续提问、翻书、看记忆。</p>
+
+    <form method="post" action="/login">
+        <label for="username">用户名</label>
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+        <label for="password">口令</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">进入学习</button>
+    </form>
+
+    <p id="error" class="error" hidden>用户名或口令不对，再试一次。</p>
+
+    <div class="foot">
+        <a href="/">← 回到首页</a>
+        <span>PRIVATE STUDY ROOM</span>
+    </div>
+</main>
+<script>
+    if (new URLSearchParams(location.search).has('error')) {
+        document.getElementById('error').hidden = false;
+    }
+</script>
+</body>
+</html>

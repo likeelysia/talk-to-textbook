@@ -6,6 +6,8 @@
 spring:
   application:
     name: talk-to-textbook
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
 
   # ---- 静态资源缓存 ----
   # 前端改了 JS/CSS,浏览器却还拿旧的(得 Ctrl+F5 才生效)—— 就是因为没设这个头。
@@ -27,9 +29,27 @@ spring:
 
 server:
   port: 8080          # HTTP 接口端口(可用 --server.port=xxxx 覆盖)
+  shutdown: graceful
+  forward-headers-strategy: framework   # 放在 Nginx/HTTPS 后面时,正确识别 https / 客户端 IP
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+        # 本地 HTTP 演练用 false;正式 HTTPS 部署设为 true
+        secure: ${FA_COOKIE_SECURE:false}
 
 fa:
   debug: false
+
+  # ---- 单用户登录(Spring Security)----
+  # username: 登录名
+  # password-hash: BCrypt 哈希(推荐,部署用)
+  # password: 明文口令(只从环境变量读,启动时编码进内存,不落盘;适合本地演练)
+  auth:
+    username: ${FA_AUTH_USERNAME:pengge}
+    password: ${FA_AUTH_PASSWORD:}
+    password-hash: ${FA_AUTH_PASSWORD_HASH:}
 
   # ---- 统一上下文预算(字符,粗略≈token;第一版按 1 字≈1 token 保守估算)----
   # max-chars: 核心档案 + 长期记忆 + 摘要 + 最近历史 + 当前问题的总预算
@@ -39,6 +59,19 @@ fa:
     max-chars: ${FA_CONTEXT_MAX_CHARS:14000}
     reserve-chars: ${FA_CONTEXT_RESERVE_CHARS:3000}
     tool-result-max-chars: ${FA_TOOL_RESULT_MAX_CHARS:6000}
+
+  # ---- 流式问答资源边界(小机器别让无限线程把内存吃光)----
+  stream:
+    workers: ${FA_STREAM_WORKERS:4}
+    queue: ${FA_STREAM_QUEUE:8}
+
+  # ---- 模型请求并发边界:同时最多几轮问答在调模型 ----
+  model:
+    max-concurrent: ${FA_MODEL_MAX_CONCURRENT:2}
+
+  # ---- 问答接口限流(每个会话/IP 每分钟)----
+  rate-limit:
+    per-minute: ${FA_RATE_LIMIT_PER_MINUTE:12}
 
   # ---- 背词工具(词典外置,不打包进 jar)----
   # dict-path: ECDICT 的 stardict.db 路径;默认项目下 dict/stardict.db
@@ -113,11 +146,17 @@ fa:
       min-chars: ${FA_OCR_MIN_CHARS:30}
       min-chinese-ratio: ${FA_OCR_MIN_CHINESE_RATIO:0.2}
 
-  # ---- 本地 embedding 服务(llama.cpp llama-server)----
+  # ---- embedding 服务:本地 llama.cpp 或任意 OpenAI 兼容云端服务 ----
   embedding:
     url: ${FA_EMBEDDING_URL:http://127.0.0.1:8090}
     # 多语言(中英)embedding:换模型 = 向量指纹变 → 旧 base.vectors.json 自动作废重算
     model: ${FA_EMBEDDING_MODEL:bge-m3}
+    # 云端服务需要 Bearer;本地 llama-server 留空
+    api-key: ${FA_EMBEDDING_API_KEY:}
+    # 健康探测路径;云端没有 /health 就留空(/api/health 显示 UNKNOWN,不假装 UP)
+    health-path: ${FA_EMBEDDING_HEALTH_PATH:/health}
+    # 单次 embedding 请求超时(秒)
+    timeout-seconds: ${FA_EMBEDDING_TIMEOUT_SECONDS:20}
 
   # ---- 知识库 ----
   knowledge:
