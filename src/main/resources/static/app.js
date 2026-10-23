@@ -435,13 +435,50 @@ function redirectToLogin() {
     location.href = '/login.html';
 }
 
+/** 从 XSRF-TOKEN Cookie 取 CSRF token(Spring Security CookieCsrfTokenRepository)。 */
+function csrfToken() {
+    const prefix = 'XSRF-TOKEN=';
+    for (const part of document.cookie.split(';')) {
+        const item = part.trim();
+        if (item.startsWith(prefix)) {
+            return decodeURIComponent(item.substring(prefix.length));
+        }
+    }
+    return '';
+}
+
 async function authFetch(url, options) {
-    const res = await window.fetch(url, options);
+    const opts = options ? Object.assign({}, options) : {};
+    const method = (opts.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const token = csrfToken();
+        if (token) {
+            opts.headers = Object.assign({}, opts.headers || {}, { 'X-XSRF-TOKEN': token });
+        }
+    }
+    const res = await window.fetch(url, opts);
     if (res.status === 401) {
         redirectToLogin();
         throw new Error('登录已过期，请重新登录');
     }
+    if (res.status === 403) {
+        throw new Error('安全校验失败，请刷新页面后重试');
+    }
     return res;
+}
+
+/** 退出登录是原生表单 POST,也要带 CSRF 隐藏字段。 */
+function ensureLogoutCsrf() {
+    const token = csrfToken();
+    if (!token) return;
+    document.querySelectorAll('form[action="/logout"]').forEach(form => {
+        if (form.querySelector('input[name="_csrf"]')) return;
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = '_csrf';
+        input.value = token;
+        form.appendChild(input);
+    });
 }
 
 /** 统一的 JSON 请求:非 2xx 就把后端给的 {"error":"..."} 抛出来。 */
@@ -1507,5 +1544,6 @@ document.addEventListener('keydown', (e) => {
     else if (!notebookModal.hidden) closeNotebook();
 });
 
+ensureLogoutCsrf();
 loadKnowledge();
 initConversations();

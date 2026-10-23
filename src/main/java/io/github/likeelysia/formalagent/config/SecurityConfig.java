@@ -17,7 +17,11 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import io.github.likeelysia.formalagent.web.CsrfCookieFilter;
 
 /**
  * 单用户受控访问:登录后才能看学习数据、调模型;首页/登录页/健康检查公开。
@@ -33,8 +37,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * </ul>
  * 两个都没配 = 启动直接失败,避免"以为有登录、其实裸奔"。
  *
- * <p><b>CSRF 关闭</b>:这是同源 SPA + JSON 接口,登录态用 SameSite=Lax 的会话 Cookie;
- * 如果以后要接第三方站点再打开 CSRF token。
+ * <p><b>CSRF 开启</b>:Session 认证下用 Spring Security 的 CSRF 保护;登录/退出表单带
+ * {@code _csrf} 隐藏字段,SPA 写请求/上传/SSE 带 {@code X-XSRF-TOKEN}(Cookie {@code XSRF-TOKEN})。
+ * 不是靠 SameSite 代替 CSRF。
  */
 @Configuration
 public class SecurityConfig {
@@ -72,7 +77,8 @@ public class SecurityConfig {
                         // 首页/登录/静态欢迎资源/健康检查:公开
                         .requestMatchers("/", "/index.html", "/welcome.css", "/welcome.js",
                                 "/contact.html", "/login.html", "/favicon.ico",
-                                "/api/health", "/error").permitAll()
+                                "/style.css", "/study-theme.css", "/img/wechat.jpg",
+                                "/api/health", "/api/auth/csrf", "/error").permitAll()
                         // 其余(study.html、app.js、vocab.html、所有业务 API)都要登录
                         .anyRequest().authenticated())
                 .formLogin(form -> form
@@ -86,8 +92,13 @@ public class SecurityConfig {
                         .logoutSuccessUrl("/")
                         .invalidateHttpSession(true)
                         .deleteCookies("JSESSIONID"))
-                // 同源 SPA + JSON:关闭 CSRF;登录态靠 SameSite=Lax 的会话 Cookie
-                .csrf(csrf -> csrf.disable())
+                // Session 认证 + 浏览器表单/SSE/上传:恢复框架 CSRF;
+                // SPA 读 XSRF-TOKEN Cookie,写操作带 X-XSRF-TOKEN 头
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        // SPA 从 Cookie 取原始 token 写 X-XSRF-TOKEN;不要用 XOR 掩码
+                        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
+                .addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
                 // API 未登录返回 401(让前端跳登录),页面未登录仍跳登录页
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(authenticationEntryPoint())

@@ -30,7 +30,12 @@ spring:
 server:
   port: 8080          # HTTP 接口端口(可用 --server.port=xxxx 覆盖)
   shutdown: graceful
-  forward-headers-strategy: framework   # 放在 Nginx/HTTPS 后面时,正确识别 https / 客户端 IP
+  # native: 用 Tomcat RemoteIpValve 解析代理头,只信任 internal-proxies 里的代理;
+  # 不用 framework(它会信任任意客户端伪造的 X-Forwarded-For)
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: "${FA_TRUSTED_PROXY_REGEX:10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\..*|172\\.(1[6-9]|2\\d|3[01])\\..*|127\\.0\\.0\\.1|::1}"
   servlet:
     session:
       cookie:
@@ -65,9 +70,13 @@ fa:
     workers: ${FA_STREAM_WORKERS:4}
     queue: ${FA_STREAM_QUEUE:8}
 
-  # ---- 模型请求并发边界:同时最多几轮问答在调模型 ----
+  # ---- 模型请求并发边界:所有文字/视觉/摘要/记忆提炼共用一个总预算 ----
   model:
     max-concurrent: ${FA_MODEL_MAX_CONCURRENT:2}
+    # 后台提炼最多占几个总名额;保证至少一个留给交互
+    background-concurrent: ${FA_MODEL_BACKGROUND_CONCURRENT:1}
+    # 等名额的上限;超时回 503
+    acquire-timeout-seconds: ${FA_MODEL_ACQUIRE_TIMEOUT_SECONDS:10}
 
   # ---- 问答接口限流(每个会话/IP 每分钟)----
   rate-limit:

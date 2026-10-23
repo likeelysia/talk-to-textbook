@@ -3,7 +3,6 @@ package io.github.likeelysia.formalagent.agent;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.exception.AgentException;
-import io.github.likeelysia.formalagent.exception.OverloadedException;
 import io.github.likeelysia.formalagent.llm.LlmClient;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import io.github.likeelysia.formalagent.llm.dto.AssistantTurn;
@@ -14,11 +13,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -54,20 +50,10 @@ public class AgentService {
     private final LlmClient llm;
     private final ObjectMapper mapper;
     private final Map<String, Tool> tools = new LinkedHashMap<>();
-    /** 同时最多几个"整轮问答"在调模型;超出的等一会儿,再不行就明确拒绝。 */
-    private final Semaphore modelSlots;
 
-    /** 测试 / 手工装配用:默认最多 2 个并发模型请求。 */
     public AgentService(LlmClient llm, List<Tool> tools, ObjectMapper mapper) {
-        this(llm, tools, mapper, 2);
-    }
-
-    @Autowired
-    public AgentService(LlmClient llm, List<Tool> tools, ObjectMapper mapper,
-                        @Value("${fa.model.max-concurrent:2}") int maxConcurrent) {
         this.llm = llm;
         this.mapper = mapper;
-        this.modelSlots = new Semaphore(Math.max(1, maxConcurrent));
         for (Tool tool : tools) {
             this.tools.put(tool.name(), tool);
         }
@@ -105,27 +91,8 @@ public class AgentService {
         AssistantTurn next(List<AgentMessage> messages, List<ToolDefinition> definitions);
     }
 
-    /** 资源闸门:最多 N 个整轮问答同时调模型,等不到就明确拒绝。 */
-    private AgentResult loop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
-        boolean acquired;
-        try {
-            acquired = modelSlots.tryAcquire(10, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new OverloadedException("等待模型并发名额时被中断，请稍后重试");
-        }
-        if (!acquired) {
-            throw new OverloadedException("当前提问较多，模型正在忙，请稍后重试");
-        }
-        try {
-            return doLoop(question, history, sink, source);
-        } finally {
-            modelSlots.release();
-        }
-    }
-
     /** ReAct 主循环:流式与非流式共用这一份;{@code sink} 为 null 表示不流式。 */
-    private AgentResult doLoop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
+    private AgentResult loop(String question, List<AgentMessage> history, StreamSink sink, TurnSource source) {
         if (question == null || question.isBlank()) {
             throw new AgentException("问题不能为空");
         }

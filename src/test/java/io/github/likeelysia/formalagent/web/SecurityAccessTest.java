@@ -1,6 +1,7 @@
 package io.github.likeelysia.formalagent.web;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -43,12 +44,19 @@ class SecurityAccessTest {
         mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/memory")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/conversations")).andExpect(status().isUnauthorized());
+
+        // 联系页公开时,它依赖的样式和二维码也必须放行
+        mvc.perform(get("/contact.html")).andExpect(status().isOk());
+        mvc.perform(get("/style.css")).andExpect(status().isOk());
+        mvc.perform(get("/study-theme.css")).andExpect(status().isOk());
+        mvc.perform(get("/img/wechat.jpg")).andExpect(status().isOk());
     }
 
     @Test
     @DisplayName("登录后:能读登录状态和记忆接口")
     void loginGrantsAccess() throws Exception {
         MvcResult login = mvc.perform(post("/login")
+                        .with(csrf())
                         .param("username", "pengge")
                         .param("password", "test-password"))
                 .andExpect(status().is3xxRedirection())
@@ -60,5 +68,50 @@ class SecurityAccessTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("pengge"))
                 .andExpect(jsonPath("$.authenticated").value(true));
+    }
+
+    @Test
+    @DisplayName("连续错误口令被登录入口限流,换新会话也绕不过")
+    void loginBruteForceIsThrottled() throws Exception {
+        for (int i = 0; i < LoginAttemptService.MAX_FAILURES; i++) {
+            mvc.perform(post("/login")
+                            .with(csrf())
+                            .with(request -> {
+                                request.setRemoteAddr("10.9.9.9");
+                                return request;
+                            })
+                            .param("username", "attacker")
+                            .param("password", "wrong-password"))
+                    .andExpect(status().is3xxRedirection());
+        }
+
+        mvc.perform(post("/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setRemoteAddr("10.9.9.9");
+                            return request;
+                        })
+                        .param("username", "attacker")
+                        .param("password", "wrong-password"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", containsString("login.html?locked=1")));
+    }
+
+    @Test
+    @DisplayName("状态变更请求缺 CSRF 被拒;带 CSRF 可退出登录")
+    void stateChangingRequestsRequireCsrf() throws Exception {
+        MvcResult login = mvc.perform(post("/login")
+                        .with(csrf())
+                        .param("username", "pengge")
+                        .param("password", "test-password"))
+                .andExpect(status().is3xxRedirection())
+                .andReturn();
+        org.springframework.mock.web.MockHttpSession session =
+                (org.springframework.mock.web.MockHttpSession) login.getRequest().getSession(false);
+
+        mvc.perform(post("/logout").session(session)).andExpect(status().isForbidden());
+        mvc.perform(post("/logout").session(session).with(csrf()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/"));
     }
 }

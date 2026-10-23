@@ -56,13 +56,21 @@ public class OpenAiCompatibleVisionClient implements VisionClient {
     private final HttpClient client;
     private final ObjectMapper mapper;
     private final AppConfig config;
+    private final ModelConcurrencyLimiter limiter;
 
     /** 厂商专属字段:装配时就解析好 —— JSON 写错的话启动即报错,不用等第一次请求才炸 */
     private final Map<String, Object> extraBody;
 
     public OpenAiCompatibleVisionClient(AppConfig config, ObjectMapper mapper) {
+        this(config, mapper, new ModelConcurrencyLimiter(2, 1, 10));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public OpenAiCompatibleVisionClient(AppConfig config, ObjectMapper mapper,
+                                        ModelConcurrencyLimiter limiter) {
         this.config = config;
         this.mapper = mapper;
+        this.limiter = limiter;
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(config.llm().connectTimeoutSeconds()))
                 .build();
@@ -103,6 +111,12 @@ public class OpenAiCompatibleVisionClient implements VisionClient {
                     multiplier = 2.0, random = false))
     @Override
     public String ask(Path image, String prompt) {
+        try (ModelConcurrencyLimiter.Permit ignored = limiter.acquire()) {
+            return askWithPermit(image, prompt);
+        }
+    }
+
+    private String askWithPermit(Path image, String prompt) {
         AppConfig.Vision v = requireVision();
         String apiKey = ApiKeys.resolve(v.apiKey(), v.apiKeyEnv());   // 没配密钥:在发请求之前就报错
         try {

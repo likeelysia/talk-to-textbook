@@ -147,6 +147,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Security MockMvc:csurf()/with(user()) 等测试支持 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <!-- ========== 构建插件:打"可执行 jar" ========== -->

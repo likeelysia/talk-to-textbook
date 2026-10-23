@@ -1,0 +1,37 @@
+# ============================================================================
+#  本地向量服务覆盖文件（可选）
+#  用法:
+#    docker compose -f docker-compose.yml -f docker-compose.local-embedding.yml up -d --build
+#  它只在“同机跑 llama.cpp”时使用;外部向量服务不要带这个文件。
+# ============================================================================
+
+services:
+  app:
+    environment:
+      FA_EMBEDDING_URL: http://embedding:8090
+    depends_on:
+      embedding:
+        condition: service_started
+
+  embedding:
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    command:
+      - "-m"
+      - "${LLAMA_MODEL:-/models/bge-m3-Q8_0.gguf}"
+      - "--embeddings"
+      - "--pooling"
+      - "cls"
+      - "-c"
+      - "512"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8090"
+      - "-t"
+      - "${LLAMA_THREADS:-4}"
+    volumes:
+      - ./models:/models:ro
+    expose:
+      - "8090"
+    mem_limit: ${EMBEDDING_MEM_LIMIT:-3g}
+    restart: unless-stopped

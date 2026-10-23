@@ -6,6 +6,7 @@ import io.github.likeelysia.formalagent.conversation.Conversation;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.EmbeddingClient;
+import io.github.likeelysia.formalagent.llm.ModelCallContext;
 import io.github.likeelysia.formalagent.llm.Vectors;
 import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import jakarta.annotation.PreDestroy;
@@ -337,6 +338,14 @@ public class LongTermMemory {
      */
     void extract(Conversation conversation, List<ChatMessage> pending, String scopeAtSubmit,
                  long generationAtSubmit, int from, int to) {
+        // 后台提炼在共享模型预算里只占“后台名额”,不能把交互问答的总额度吃光
+        try (ModelCallContext.Scope ignored = ModelCallContext.background()) {
+            extractInBackground(conversation, pending, scopeAtSubmit, generationAtSubmit, from, to);
+        }
+    }
+
+    private void extractInBackground(Conversation conversation, List<ChatMessage> pending,
+                                     String scopeAtSubmit, long generationAtSubmit, int from, int to) {
         // 水位推到"快照里有几条消息",不是"现在有几条" —— 跑着的时候可能又来新消息
         int watermark = conversation.messages().size();
         String currentScope;

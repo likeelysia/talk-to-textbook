@@ -69,9 +69,68 @@
     </div>
 </main>
 <script>
-    if (new URLSearchParams(location.search).has('error')) {
-        document.getElementById('error').hidden = false;
+    const params = new URLSearchParams(location.search);
+    const error = document.getElementById('error');
+    if (params.has('error')) {
+        error.hidden = false;
     }
+    if (params.has('locked')) {
+        error.textContent = '尝试次数过多，请稍等一会儿再试。';
+        error.hidden = false;
+    }
+
+    const form = document.querySelector('form[action="/login"]');
+    const csrfInputName = '_csrf';
+
+    function readCookie(name) {
+        const prefix = name + '=';
+        for (const part of document.cookie.split(';')) {
+            const item = part.trim();
+            if (item.startsWith(prefix)) {
+                return decodeURIComponent(item.substring(prefix.length));
+            }
+        }
+        return '';
+    }
+
+    function addToken(token) {
+        if (!token || form.querySelector('input[name="' + csrfInputName + '"]')) return;
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = csrfInputName;
+        input.value = token;
+        form.appendChild(input);
+    }
+
+    async function ensureToken() {
+        let token = readCookie('XSRF-TOKEN');
+        if (!token) {
+            try {
+                const res = await fetch('/api/auth/csrf', { credentials: 'same-origin' });
+                if (res.ok) {
+                    const data = await res.json();
+                    token = data.token || '';
+                }
+            } catch (e) {
+                token = '';
+            }
+        }
+        addToken(token);
+        return token;
+    }
+
+    ensureToken();
+    form.addEventListener('submit', async (event) => {
+        if (form.querySelector('input[name="' + csrfInputName + '"]')) return;
+        event.preventDefault();
+        const token = await ensureToken();
+        if (token) {
+            form.submit();
+        } else {
+            error.textContent = '页面已过期，请刷新后重试。';
+            error.hidden = false;
+        }
+    });
 </script>
 </body>
 </html>

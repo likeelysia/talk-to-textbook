@@ -39,6 +39,11 @@
 | `FA_EMBEDDING_URL` | embedding 地址 | 是 |
 | `FA_EMBEDDING_MODEL` | 模型标识 | 是 |
 | `FA_EMBEDDING_API_KEY` | 云端 embedding 的 Bearer | 云端必填 |
+| `FA_MODEL_MAX_CONCURRENT` | 所有模型调用总并发 | 建议 2 |
+| `FA_MODEL_BACKGROUND_CONCURRENT` | 后台提炼最多占用 | 建议 1 |
+| `FA_MODEL_ACQUIRE_TIMEOUT_SECONDS` | 等模型名额上限 | 默认 10 |
+| `FA_RATE_LIMIT_PER_MINUTE` | 每账号/IP 每分钟问答 | 默认 12 |
+| `FA_TRUSTED_PROXY_REGEX` | 只信任这些内网代理的转发头 | 默认内网网段 |
 | `FA_COOKIE_SECURE` | HTTPS 下设为 `true` | 正式部署 |
 
 生成 BCrypt 哈希（Linux 服务器）：
@@ -74,7 +79,7 @@ java -jar target\talk-to-textbook-0.1.0-SNAPSHOT.jar --server.port=8080
 
 ## 5. Docker 部署
 
-### 5.1 准备模型（本地 embedding）
+### 5.1 准备模型（仅本地方案）
 
 ```bash
 mkdir -p models
@@ -84,31 +89,56 @@ mkdir -p models
 
 ### 5.2 准备目录权限
 
-容器内应用用户 UID/GID 是 `10001`。bind mount 的目录要让它可以写：
+**先建目录，再 chown**（干净检出时这些目录不存在；Docker 不会替你修好 bind mount 的主机权限）：
 
 ```bash
+mkdir -p data/conversations data/memory data/notes data/uploads data/checkpoints \
+         knowledge sessions logs dict models
+# models 只有本地方案会用到;外部方案留空即可
 sudo chown -R 10001:10001 data knowledge sessions logs dict models
 ```
 
-### 5.3 启动
+容器内应用用户 UID/GID 是 `10001`；不要用 root 跑应用。
+
+### 5.3 启动（两种向量方案二选一）
+
+先：
 
 ```bash
 cp .env.example .env
-# 编辑 .env：登录凭据、模型密钥、embedding 地址
+# 编辑 .env：登录凭据、模型密钥、FA_EMBEDDING_URL
+```
+
+**A. 外部向量服务（不启动本地 llama.cpp）**
+
+```bash
 docker compose up -d --build
-docker compose ps
+docker compose ps          # 应只有 app（以及你要的 nginx），没有 embedding
+curl -fsS http://127.0.0.1:8080/api/health
+```
+
+`.env` 里 `FA_EMBEDDING_URL` 填服务根地址（客户端会拼 `/v1/embeddings`），并确认 `FA_EMBEDDING_API_KEY`/模型名；外部方案不需要 `models/` 目录。
+
+**B. 同机本地模型（llama.cpp 容器）**
+
+```bash
+# 先把 bge-m3 GGUF 放到 models/bge-m3-Q8_0.gguf（文件名不同改 LLAMA_MODEL）
+docker compose -f docker-compose.yml -f docker-compose.local-embedding.yml up -d --build
+docker compose ps          # 此时应有 app + embedding
 curl -fsS http://127.0.0.1:8080/api/health
 ```
 
 - `app` 只绑定 `127.0.0.1:8080`，公网不能直连。
-- 本地 embedding 容器在 compose 内网 `embedding:8090`。
-- 更新镜像：`docker compose build app && docker compose up -d app`；数据卷不受影响。
-- 停：`docker compose down`（不要加 `-v`，否则会删命名卷；本项目用 bind mount，仍建议别加）。
+- 本地方案才把 `FA_EMBEDDING_URL` 覆盖成 `http://embedding:8090`；外部方案不要带 local override。
+- **内存提示**：app 2g + embedding 3g 是两个容器各自的 limit，不是“2GB 服务器方案”。2C4G 建议只用外部 embedding；本机模型建议 4C8G 起，并按实测调 `APP_MEM_LIMIT`/`EMBEDDING_MEM_LIMIT`。
+- 更新镜像：`docker compose build app && docker compose up -d app`；本地模型方案要同时保留 `-f` 参数。
+- 停：`docker compose down`（别加 `-v`）。
 
 ### 5.4 Nginx / HTTPS
 
 ```bash
 docker compose --profile proxy up -d
+# 本地模型方案:在前面加 -f docker-compose.local-embedding.yml
 ```
 
 把证书放到 `deploy/certs/fullchain.pem`、`privkey.pem`，在 `deploy/nginx.conf` 里取消 HTTPS server 注释，并把 `FA_COOKIE_SECURE=true`。
@@ -118,6 +148,8 @@ Nginx 已配置：`proxy_buffering off`、`proxy_read_timeout 300s`、`client_ma
 ### 5.5 日志 / 健康 / 回滚
 
 ```bash
+# 本地模型方案把下面每条 docker compose 都加上
+#   -f docker-compose.yml -f docker-compose.local-embedding.yml
 docker compose logs -f app
 curl -fsS http://127.0.0.1:8080/api/health
 docker compose restart app
@@ -130,6 +162,7 @@ docker compose restart app
 git checkout <上一个稳定 commit>
 docker compose build app
 docker compose up -d app
+# 本地模型方案上面两条同样加 -f docker-compose.local-embedding.yml
 # 数据回滚：先停 app，再用备份恢复到隔离目录，确认后同步回 data/knowledge/sessions
 ```
 
@@ -151,22 +184,34 @@ docker compose up -d app
 | 日志 | `logs/` | 排障用，可不进备份 |
 | 模型文件 | `models/` | 可重新下载，不进备份 |
 
-### 6.2 备份 / 恢复（Linux）
+### 6.2 备份 / 恢复（Linux，一致备份）
+
+备份默认要求**先停服务/停写**，避免会话、记忆水位和提炼结果来自不同时刻：
 
 ```bash
-./scripts/backup.sh
-./scripts/restore.sh backups/talk-to-textbook-YYYYmmdd-HHMMSS.tar.gz /tmp/restore-test
+STOP_CMD='docker compose stop app' START_CMD='docker compose start app' \
+  bash scripts/backup.sh
+
+# 恢复前先校验 checksum；目标必须为空目录
+bash scripts/restore.sh backups/talk-to-textbook-YYYYmmdd-HHMMSS-*.tar.gz /tmp/restore-test
 # 检查 /tmp/restore-test/knowledge/base.json、data/conversations、data/memory 等
 ```
 
-`restore.sh` 默认**拒绝覆盖非空目录**；真实恢复要先停服务，确认后再同步。
+- 脚本会生成 `.manifest.txt` 和 `.sha256`；恢复前必须校验通过。
+- 归档失败、校验失败、目标非空都会非零退出；服务恢复命令在 `trap` 里执行。
+- 真实恢复要先停服务，确认隔离目录内容后再同步回项目；不要直接覆盖真实数据。
+- 没有 `STOP_CMD`/`START_CMD` 时脚本**拒绝归档**，不再做“运行中直接 tar”。
+- 个人版只有一个 app 写入实例；如果同时开了 CLI 灌库/导入，也要一并停掉。`STOP_WAIT_SECONDS`（默认 3 秒）给优雅停机和后台任务收尾留时间。
+- 不想依赖执行位时统一用 `bash scripts/backup.sh` / `bash scripts/restore.sh`。
 
 ### 6.3 Windows 本地演练
 
 ```powershell
-.\scripts\backup.ps1
+.\scripts\backup.ps1 -StopCommand "Write-Output stop" -StartCommand "Write-Output start"
 .\scripts\restore.ps1 -Archive .\backups\talk-to-textbook-....tar.gz -Target .\tmp\restore-test
 ```
+
+PowerShell 备份同样要求停写命令，并显式检查 `tar` 退出码；恢复会校验 `.sha256`。
 
 ## 7. 资源边界
 
@@ -174,8 +219,11 @@ docker compose up -d app
 |---|---|---|
 | SSE 工作线程 | 4 | `FA_STREAM_WORKERS` |
 | SSE 排队 | 8 | `FA_STREAM_QUEUE` |
-| 同时调模型的整轮问答 | 2 | `FA_MODEL_MAX_CONCURRENT` |
-| 每会话/IP 每分钟问答 | 12 | `FA_RATE_LIMIT_PER_MINUTE` |
+| 所有文字/视觉/摘要/提炼合计并发 | 2 | `FA_MODEL_MAX_CONCURRENT` |
+| 后台提炼最多占用 | 1（总预算内） | `FA_MODEL_BACKGROUND_CONCURRENT` |
+| 等模型名额上限 | 10 秒 | `FA_MODEL_ACQUIRE_TIMEOUT_SECONDS` |
+| 每账号/IP 每分钟问答 | 12（另加全局预算） | `FA_RATE_LIMIT_PER_MINUTE` |
+| 登录失败退避 | 5 次/5 分钟，30 秒起，最多 15 分钟 | 代码常量 |
 | 单文件上传 | 100 MB | `FA_MAX_FILE_SIZE` |
 | 整请求上传 | 120 MB | `FA_MAX_REQUEST_SIZE` |
 | 图片张数 | 10 | 代码常量 `AgentController.MAX_IMAGES` |
@@ -183,39 +231,59 @@ docker compose up -d app
 | 工具结果回灌 | 6000 字符 | `FA_TOOL_RESULT_MAX_CHARS` |
 | 上下文预算 | 14000 字符 / 预留 3000 | `FA_CONTEXT_MAX_CHARS` / `FA_CONTEXT_RESERVE_CHARS` |
 
-超限反馈：429（限流）、503/400（模型忙/并发满）、SSE `error` 事件（流内失败）。
+超限反馈：429（问答/登录限流）、503（模型名额等不到）、400（参数/模型业务错）、SSE `error` 事件（流内失败）。
+
+模型并发预算放在**真实 HTTP 调用层**（`DeepSeekClient.post/postStream`、`OpenAiCompatibleVisionClient.ask`），不是包在某一轮问答外面；因此文字、图片、滚动摘要、记忆提炼/对账共用同一份名额，流式请求一直占到流结束。后台提炼只占 `FA_MODEL_BACKGROUND_CONCURRENT`，不会把交互全挤掉；异常/超时/取消都由 try-with-resources 归还。
+
+CSRF：Session 认证下默认开启 Spring Security CSRF；登录表单/退出表单带 `_csrf` 隐藏字段，SPA 的 POST/PUT/DELETE/上传/SSE 带 `X-XSRF-TOKEN` 头（Cookie `XSRF-TOKEN`）。缺失/错误凭证返回 403。
+
+联系页：`contact.html` 公开，同时放行它需要的 `/style.css`、`/study-theme.css`、`/img/wechat.jpg`；业务 API 和数据目录仍受登录保护。
 
 日志带 `X-Request-Id`，可用它串起一次请求的模型调用、工具执行和错误；日志不打印密钥/完整 prompt。
 
 ## 8. 向量服务：两套可执行方案
 
-### A. 本地 llama.cpp（默认，compose 已带）
+### A. 同机本地 llama.cpp（可选 override）
 
-- 镜像：`ghcr.io/ggml-org/llama.cpp:server`（若拉不到，换 `ghcr.io/ggerganov/llama.cpp:server`）。
-- 模型：`bge-m3-Q8_0.gguf`，放 `models/`。
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-embedding.yml up -d --build
+docker compose ps     # 应有 app + embedding
+```
+
+- 镜像：`ghcr.io/ggml-org/llama.cpp:server`（拉不到就换 `ghcr.io/ggerganov/llama.cpp:server`）。
+- 模型：`bge-m3-Q8_0.gguf`，放 `models/`；缺模型时 embedding 容器会反复失败，app 仍能启动但 `/api/health` 显示 embedding DOWN，语义检索降级，文字问答/记忆仍可用（RAG 只剩关键词）。
 - 端点：容器内 `http://embedding:8090`，接口 `/v1/embeddings`，健康 `/health`。
-- 内存：约 1.5–2.5 GB；CPU 4 线程起步。
-- 费用：服务器成本；无按次调用费。
+- 内存：约 1.5–2.5 GB；CPU 4 线程起步。2GB 机器不要用这套。
 
-### B. 云端 OpenAI 兼容 embedding
+### B. 外部 OpenAI 兼容 embedding（不启动本地模型）
+
+```bash
+# .env 里填好外部地址后
+docker compose up -d --build
+docker compose ps     # 不应出现 embedding 容器
+```
 
 `.env`：
 
 ```dotenv
-FA_EMBEDDING_URL=https://你的服务地址
+FA_EMBEDDING_URL=https://你的服务根地址   # 客户端会拼 /v1/embeddings
 FA_EMBEDDING_MODEL=你的模型标识
 FA_EMBEDDING_API_KEY=你的key
-FA_EMBEDDING_HEALTH_PATH=/health   # 没有就留空，健康显示 UNKNOWN
+FA_EMBEDDING_HEALTH_PATH=/health         # 没有就留空，健康显示 UNKNOWN
+FA_EMBEDDING_TIMEOUT_SECONDS=20
 ```
 
-要求：请求 `POST /v1/embeddings`、响应 `data[].embedding`；超时/鉴权/条数要核对。换模型/维度后旧向量自动作废，首次检索会重算，别把旧缓存和新模型混用。
+要求：请求 `POST /v1/embeddings`、响应 `data[].embedding`；超时/鉴权/条数要核对。换模型/维度后旧向量自动作废，首次检索会重算，别把旧缓存和新模型混用。外部方案**不需要 `models/`，也不需要 `docker-compose.local-embedding.yml`**。
 
 ## 9. 已知限制
 
 1. 单用户，不是多租户；没有注册/找回密码。
 2. 登录会话在内存，重启后需要重新登录（数据不丢）。
 3. SSE 取消只能做到“每一步之间停手”；已经开始的一次模型 HTTP 请求无法强杀，这是当前客户端能力边界。
-4. 限流/会话计数在单机内存；多实例部署要换共享存储。
+4. 限流/登录失败计数在单机内存；多实例部署要换共享存储。代理 IP 只信任 `FA_TRUSTED_PROXY_REGEX` 里的内网代理。
 5. 文件存储单机；没有数据库/HA。
 6. Docker 镜像与云服务器尚未实测（本机无 Docker）；需要目标机器信息后才能完成云端验收。
 7. `FA_AUTH_PASSWORD` 明文只适合本地/首次部署；正式环境用 BCrypt 哈希。
+8. 外部 embedding 只做了配置/接口方向核对，没有真实云端服务可测；本地 llama.cpp 是实测路径。
+9. 缺 `dict/stardict.db` 时词典/生词功能不可用，问答不受影响；缺本地模型时 app 仍启动，但 `/api/health` 的 embedding 为 DOWN，检索降级为关键词。
+10. app 2g + embedding 3g 是容器 limit，不是“2GB 服务器可跑”的承诺；2GB 机器请用外部 embedding，并按实测压内存。

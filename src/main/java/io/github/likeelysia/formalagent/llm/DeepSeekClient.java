@@ -47,10 +47,17 @@ public class DeepSeekClient implements LlmClient {
     private final HttpClient client;                     // 重对象:构造时建一份,复用
     private final ObjectMapper mapper;                   // ← 容器注入的统一 JSON 序列化器
     private final AppConfig config;                      // ← 配置也由容器塞进来
+    private final ModelConcurrencyLimiter limiter;
 
-    public DeepSeekClient(AppConfig config, ObjectMapper mapper) {   // 单构造器,@Autowired 可省
+    public DeepSeekClient(AppConfig config, ObjectMapper mapper) {
+        this(config, mapper, new ModelConcurrencyLimiter(2, 1, 10));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DeepSeekClient(AppConfig config, ObjectMapper mapper, ModelConcurrencyLimiter limiter) {
         this.config = config;
         this.mapper = mapper;
+        this.limiter = limiter;
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(config.llm().connectTimeoutSeconds()))
                 .build();
@@ -117,8 +124,15 @@ public class DeepSeekClient implements LlmClient {
         return postStream(request, onDelta);
     }
 
-    /** 真正发请求的地方 —— 普通对话和工具对话共用这一份。 */
+    /** 所有文字模型请求的唯一入口:名额覆盖完整 HTTP 调用(含重试)。 */
     private ChatResponse post(ChatRequest request) {
+        try (ModelConcurrencyLimiter.Permit ignored = limiter.acquire()) {
+            return postWithPermit(request);
+        }
+    }
+
+    /** 真正发请求的地方 —— 普通对话和工具对话共用这一份。 */
+    private ChatResponse postWithPermit(ChatRequest request) {
         String apiKey = apiKey();
         try {
             String body = mapper.writeValueAsString(request);
@@ -172,6 +186,12 @@ public class DeepSeekClient implements LlmClient {
      * 这才是"流式"的意义(换成 {@code ofString()} 会等到全部生成完,白搭)。
      */
     private AssistantTurn postStream(ChatRequest request, Consumer<String> onDelta) {
+        try (ModelConcurrencyLimiter.Permit ignored = limiter.acquire()) {
+            return postStreamWithPermit(request, onDelta);
+        }
+    }
+
+    private AssistantTurn postStreamWithPermit(ChatRequest request, Consumer<String> onDelta) {
         String apiKey = apiKey();
         String body;
         try {
