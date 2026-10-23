@@ -18,7 +18,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * (键是 IP + 账号,不是会话)。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 10)   // 在 RequestIdFilter 之后、Security 之前
 public class LoginRateLimitFilter extends OncePerRequestFilter {
 
     private final LoginAttemptService attempts;
