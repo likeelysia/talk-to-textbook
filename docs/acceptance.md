@@ -24,6 +24,7 @@ TOTAL=439 FAIL=0 ERR=0 SKIP=1
 - SHA-256：`61C7793C3EA5476BF15923B913D36C14B742844731EA8959E770F15BA6B5144D`
 - 已核对 JAR 内包含 `study-icons.svg`、`vocab.js`、`vocab.css`、`VocabExplanationService.class`、`VocabNotebook.class`。
 - 旧 `target/talk-to-textbook-vocab-upgrade.jar` 不作为本轮部署依据。
+- 回滚基线：上一版代码 `24a4bb4` 的 JAR 为 `dist/talk-to-textbook-0.1.0-24a4bb4.jar`，SHA-256 `BBD86B1B8F8124E6E08298B19125F1F245427020800E0DCE6F500FD4651F89BC`；回滚前先停写备份，若新版本已写入生词本，需连同数据一起恢复到升级前备份，不能只换 JAR。
 
 ### 0.2 本地隔离运行验收
 
