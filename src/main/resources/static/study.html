@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/style.css">
     <!-- 公式(KaTeX)+ 样式,和字体一起放在本地,断网也能用 -->
     <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-<link rel="stylesheet" href="/study-theme.css">
+<link rel="stylesheet" href="/study-theme.css?v=20261024-icons">
 </head>
 <body class="study-page">
 
@@ -24,11 +24,11 @@
     <aside class="convs card">
         <div class="convs-head">
             <h2>对话</h2>
-            <button id="newConv" type="button" class="mini new" title="新建一个对话(记忆独立)">＋ 新建</button>
+            <button id="newConv" type="button" class="mini new" title="新建一个对话(记忆独立)"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#plus"></use></svg><span>新建</span></button>
         </div>
         <div id="convList" class="conv-list">加载中…</div>
-        <button id="openMemory" type="button" class="mini mem-btn" title="看看这个对话记住了什么">🧠 记忆</button>
-        <button id="openNotebook" type="button" class="mini mem-btn" title="看存下来的提问和 AI 的相关回答">📒 笔记本</button>
+        <button id="openMemory" type="button" class="mini mem-btn" title="看看这个对话记住了什么"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#memory"></use></svg><span id="memoryLabel">记忆</span></button>
+        <button id="openNotebook" type="button" class="mini mem-btn" title="看存下来的提问和 AI 的相关回答"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#notebook"></use></svg><span>笔记本</span></button>
         <p class="conv-note muted small">每个对话的记忆互相独立。</p>
     </aside>
 
@@ -53,10 +53,10 @@
 
         <form id="ask-form" class="composer">
             <input id="question" type="text" placeholder="例如:沿闭合曲线跑一圈回到原点,位移是多少?" autocomplete="off">
-            <label class="icon-btn" id="pickLabel" title="上传图片提问(最多 10 张)">
-                🖼️<input id="images" type="file" accept="image/*" multiple hidden>
+            <label class="icon-btn" id="pickLabel" role="button" tabindex="0" aria-label="上传图片提问" title="上传图片提问(最多 10 张)">
+                <svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#image"></use></svg><input id="images" aria-label="选择题目图片" type="file" accept="image/*" multiple hidden>
             </label>
-            <button id="noteBtn" type="button" class="ghost" title="勾选你问过的问题,存进笔记本">📝 存笔记</button>
+            <button id="noteBtn" type="button" class="ghost" title="勾选你问过的问题,存进笔记本"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#write"></use></svg><span id="noteButtonLabel">存笔记</span></button>
             <button id="noteSave" type="button" hidden>保存 (0)</button>
             <button id="send" type="submit">提问</button>
             <button id="stop" type="button" class="ghost" hidden title="停止生成">停止</button>
@@ -72,7 +72,7 @@
 
         <div class="card contact-cta">
             <p>没有找到教材?<a class="contact-btn" href="/contact.html">点击这里联系开发者</a></p>
-            <p class="vocab-cta"><a class="contact-btn vocab-btn" href="/vocab.html">📖 打开背词工具</a></p>
+            <p class="vocab-cta"><a class="contact-btn vocab-btn" href="/vocab.html"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#book"></use></svg><span>打开背词工具</span></a></p>
         </div>
     </aside>
 </main>
@@ -81,15 +81,15 @@
 <div id="memoryModal" class="modal" hidden>
     <div class="modal-box card">
         <div class="modal-head">
-            <h2>🧠 这个对话记住的事</h2>
+            <h2><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#memory"></use></svg><span>这个对话记住的事</span></h2>
             <button id="closeMemory" type="button" class="mini">关闭</button>
         </div>
         <p class="mem-tip muted small">
-            助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标了 📌 的不会被自动清理(满了先淘汰最久没用到的那条)。
+            助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标为「已固定」的不会被自动清理(满了先淘汰最久没用到的那条)。
         </p>
         <div class="mem-core">
             <div class="mem-core-head">
-                <strong>📌 核心档案</strong>
+                <strong><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#pin"></use></svg><span>核心档案</span></strong>
                 <span class="muted small">每轮都带(约 300–500 token)</span>
             </div>
             <textarea id="coreText" rows="6" placeholder="我是谁 / 长期目标 / 当前项目 / 沟通偏好...&#10;例如:我叫鹏哥,在准备 Java 实习面试;回答要给出处;习惯国际单位制。"></textarea>
@@ -99,11 +99,11 @@
             </div>
         </div>
         <div id="memConflicts" class="mem-conflicts" hidden>
-            <div class="mem-conflict-head">⚠️ 与核心档案冲突 <span id="memConflictCount"></span></div>
+            <div class="mem-conflict-head"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#alert"></use></svg><span>与核心档案冲突</span> <span id="memConflictCount"></span></div>
             <div id="memConflictList"></div>
         </div>
         <div class="mem-scope">
-            <label for="memScope">🔗 记忆域:</label>
+            <label for="memScope"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#link"></use></svg><span>记忆域：</span></label>
             <select id="memScope"></select>
         </div>
         <p id="memScopeHint" class="muted small mem-scope-hint"></p>
@@ -124,7 +124,7 @@
 <div id="notebookModal" class="modal" hidden>
     <div class="modal-box card">
         <div class="modal-head">
-            <h2>📒 笔记本</h2>
+            <h2><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#notebook"></use></svg><span>笔记本</span></h2>
             <button id="closeNotebook" type="button" class="mini">关闭</button>
         </div>
         <p class="muted small">
@@ -141,7 +141,7 @@
 <div id="noteModal" class="modal" hidden>
     <div class="modal-box card">
         <div class="modal-head">
-            <h2>📄 笔记</h2>
+            <h2><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#file"></use></svg><span>笔记</span></h2>
             <button id="closeNote" type="button" class="mini">关闭</button>
         </div>
         <div id="noteDetail" class="note-detail">加载中…</div>
@@ -166,6 +166,6 @@
 
 <script src="/vendor/katex/katex.min.js"></script>
 <script src="/vendor/marked.min.js"></script>
-<script src="/app.js"></script>
+<script src="/app.js?v=20261024-icons"></script>
 </body>
 </html>

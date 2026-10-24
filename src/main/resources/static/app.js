@@ -24,6 +24,23 @@ const stopBtn = document.getElementById('stop');
 const convListEl = document.getElementById('convList');
 const newConvBtn = document.getElementById('newConv');
 
+/* Shared line icons; labels and user content remain text nodes. */
+function setDeskIcon(element, name, label) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'desk-icon'); svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '/study-icons.svg?v=20261024#' + name);
+    svg.appendChild(use); element.replaceChildren(svg);
+    element.setAttribute('aria-label', label);
+    if (element.tagName !== 'BUTTON') element.setAttribute('role', 'img');
+}
+pickLabel.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && !pickLabel.classList.contains('disabled')) {
+        event.preventDefault(); imagesEl.click();
+    }
+});
+
 /* ---------------- 可调参数 ---------------- */
 
 const MAX_IMAGES = 10;                       // 一次最多几张(和后端 AgentController.MAX_IMAGES 保持一致)
@@ -417,6 +434,7 @@ function renderPreviews() {
     previewsEl.hidden = picked.length === 0;
     imgCountEl.textContent = `${picked.length} / ${MAX_IMAGES}`;
     pickLabel.classList.toggle('disabled', picked.length >= MAX_IMAGES);
+    pickLabel.setAttribute('aria-disabled', String(picked.length >= MAX_IMAGES));
 }
 
 imagesEl.addEventListener('change', async () => {
@@ -527,7 +545,7 @@ function renderConversationList(convs) {
         const rename = document.createElement('button');
         rename.type = 'button';
         rename.className = 'mini';
-        rename.textContent = '✎';
+        setDeskIcon(rename, 'edit', '重命名对话');
         rename.title = '重命名';
         rename.addEventListener('click', (e) => { e.stopPropagation(); renameConversation(c); });
         tools.append(rename);
@@ -536,7 +554,7 @@ function renderConversationList(convs) {
             const del = document.createElement('button');
             del.type = 'button';
             del.className = 'mini danger';
-            del.textContent = '×';
+            setDeskIcon(del, 'close', '删除这个对话');
             del.title = '删除这个对话';
             del.addEventListener('click', (e) => { e.stopPropagation(); deleteConversation(c); });
             tools.append(del);
@@ -546,7 +564,7 @@ function renderConversationList(convs) {
         if (c.scopeId && c.scopeId !== c.id) {         // 长期记忆正和别的对话共用
             const share = document.createElement('span');
             share.className = 'conv-share';
-            share.textContent = '🔗';
+            setDeskIcon(share, 'link', '共用长期记忆');
             share.title = '长期记忆和「' + c.scopeId + '」共用';
             badge.push(share);
         }
@@ -1106,9 +1124,9 @@ function formatTime(ms) {
 async function loadMemoryCount() {
     try {
         const data = await apiJson('/api/memory?' + memQuery());
-        openMemoryBtn.textContent = `🧠 记忆(${data.count || 0})`;
+        document.getElementById('memoryLabel').textContent = `记忆（${data.count || 0}）`;
     } catch {
-        openMemoryBtn.textContent = '🧠 记忆';
+        document.getElementById('memoryLabel').textContent = '记忆';
     }
 }
 
@@ -1142,21 +1160,22 @@ function renderMemories(list) {
         const pin = document.createElement('button');
         pin.type = 'button';
         pin.className = 'mini' + (m.pinned ? ' pinned' : '');
-        pin.textContent = m.pinned ? '📌' : '📍';
+        setDeskIcon(pin, 'pin', m.pinned ? '取消固定记忆' : '固定记忆');
+        pin.setAttribute('aria-pressed', String(!!m.pinned));
         pin.title = m.pinned ? '已钉住(不会被自动清理)—— 点一下取消' : '点一下钉住(不会被自动清理)';
         pin.addEventListener('click', () => togglePin(m));
 
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = 'mini';
-        edit.textContent = '✎';
+        setDeskIcon(edit, 'edit', '修改记忆');
         edit.title = '改一下';
         edit.addEventListener('click', () => editMemory(m));
 
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'mini danger';
-        del.textContent = '×';
+        setDeskIcon(del, 'close', '删除这条记忆');
         del.title = '删掉这条';
         del.addEventListener('click', () => deleteMemory(m));
 
@@ -1174,7 +1193,7 @@ async function loadMemories() {
     try {
         const data = await apiJson('/api/memory?' + memQuery());
         renderMemories(data.memories || []);
-        openMemoryBtn.textContent = `🧠 记忆(${data.count || 0})`;
+        document.getElementById('memoryLabel').textContent = `记忆（${data.count || 0}）`;
     } catch (e) {
         memListEl.textContent = '读不出来:' + e.message;
     }
@@ -1342,7 +1361,7 @@ memForgetBtn.addEventListener('click', async () => {
 
 /* ---------------- 📝 存笔记 / 📒 笔记本 ----------------
 
-   用法:点「📝 存笔记」→ 消息区里每条「你问过的问题」旁边出现勾选框 →
+   用法:点「存笔记」→ 消息区里每条「你问过的问题」旁边出现勾选框 →
    勾几个 → 点「保存」→ 存进笔记本;再点「存笔记」= 退出。
    勾了但没保存就退出 → 问一句「要不要保存」。
    ------------------------------------------------------------------ */
@@ -1389,12 +1408,12 @@ function addUserBubble(text, index) {
 
 function renderNoteButton() {
     if (!noteSelectMode) {
-        noteBtn.textContent = '📝 存笔记';
+        document.getElementById('noteButtonLabel').textContent = '存笔记';
         noteBtn.classList.remove('active');
         noteSaveBtn.hidden = true;
         return;
     }
-    noteBtn.textContent = noteSelected.size ? `已完成(${noteSelected.size})` : '已完成';
+    document.getElementById('noteButtonLabel').textContent = noteSelected.size ? `已完成(${noteSelected.size})` : '已完成';
     noteBtn.classList.add('active');
     noteSaveBtn.hidden = noteSelected.size === 0;
     noteSaveBtn.textContent = `保存 (${noteSelected.size})`;
@@ -1466,7 +1485,7 @@ function closeNotebook() { notebookModal.hidden = true; }
 function renderNoteList(notes) {
     noteListEl.innerHTML = '';
     if (!notes.length) {
-        noteListEl.innerHTML = '<p class="muted small">还没有笔记。在对话里点「📝 存笔记」勾几个问题试试。</p>';
+        noteListEl.innerHTML = '<p class="muted small">还没有笔记。在对话里点「存笔记」勾几个问题试试。</p>';
         return;
     }
     notes.forEach(n => {
@@ -1508,7 +1527,7 @@ async function openNote(id) {
             + renderAnswer({ answer: a.text, trace: a.trace, steps: (a.trace || []).length })
             + `<div class="muted small">${formatTime(a.at)}</div></div>`).join('');
         noteDetailEl.innerHTML =
-            `<h3 class="note-q-h">📌 ${escapeHtml(n.question)}</h3>`
+            `<h3 class="note-q-h">${escapeHtml(n.question)}</h3>`
             + `<p class="muted small">存于 ${formatTime(n.savedAt)}</p>`
             + (answers || '<p class="muted small">这条问题当时还没有回答。</p>');
     } catch (e) {

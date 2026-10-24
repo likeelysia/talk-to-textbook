@@ -2,6 +2,7 @@ package io.github.likeelysia.formalagent.web;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -44,6 +45,9 @@ class SecurityAccessTest {
         mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/memory")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/conversations")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/vocab/book")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/vocab/explain").with(csrf()).contentType("application/json").content("{}"))
+                .andExpect(status().isUnauthorized());
 
         // 联系页公开时,它依赖的样式和二维码也必须放行
         mvc.perform(get("/contact.html")).andExpect(status().isOk());
@@ -113,5 +117,13 @@ class SecurityAccessTest {
         mvc.perform(post("/logout").session(session).with(csrf()))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/"));
+    }
+
+    @Test
+    void vocabularyWritesAndModelCallsRequireCsrf() throws Exception {
+        for (String path : new String[]{"/api/vocab/extract", "/api/vocab/docx", "/api/vocab/book", "/api/vocab/explain"}) {
+            mvc.perform(post(path).with(user("pengge")).contentType("application/json").content("{}"))
+                    .andExpect(status().isForbidden());
+        }
     }
 }

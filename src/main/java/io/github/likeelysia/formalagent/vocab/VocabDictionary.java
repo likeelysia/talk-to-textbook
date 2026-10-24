@@ -28,6 +28,7 @@ public class VocabDictionary {
     private final Path path;
     private Connection conn;
     private PreparedStatement lookup;
+    private boolean hasExchange;
 
     public VocabDictionary(@Value("${fa.vocab.dict-path:dict/stardict.db}") String dictPath) {
         this.path = Path.of(dictPath);
@@ -44,7 +45,8 @@ public class VocabDictionary {
                         clean(nz(rs.getString(2))),
                         clean(nz(rs.getString(3))),
                         nz(rs.getString(4)),
-                        nz(rs.getString(5))
+                        nz(rs.getString(5)),
+                        hasExchange ? nz(rs.getString(6)) : ""
                 };
             }
         }
@@ -52,17 +54,29 @@ public class VocabDictionary {
     }
 
     private void ensureOpen() throws SQLException {
-        if (conn != null && !conn.isClosed()) {
+        if (conn != null && !conn.isClosed() && lookup != null) {
             return;
         }
         if (!Files.isRegularFile(path)) {
             throw new SQLException("词典文件不存在：" + path.toAbsolutePath()
                     + "（请把 stardict.db 放到该路径，或配置 fa.vocab.dict-path / 环境变量 FA_VOCAB_DICT）");
         }
-        String url = "jdbc:sqlite:" + path.toAbsolutePath().toString().replace('\\', '/');
-        conn = DriverManager.getConnection(url);
-        lookup = conn.prepareStatement(
-                "SELECT phonetic, translation, definition, tag, pos FROM stardict WHERE word = ?");
+        close();
+        try {
+            // SQLite URI enforces read-only access even when the process can write to dict/.
+            conn = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath().toUri() + "?mode=ro");
+            try (var statement = conn.createStatement(); var columns = statement.executeQuery("PRAGMA table_info(stardict)")) {
+                hasExchange = false;
+                while (columns.next()) {
+                    if ("exchange".equals(columns.getString("name"))) hasExchange = true;
+                }
+            }
+            lookup = conn.prepareStatement("SELECT phonetic, translation, definition, tag, pos"
+                    + (hasExchange ? ", exchange" : "") + " FROM stardict WHERE word = ? COLLATE NOCASE");
+        } catch (SQLException e) {
+            close();
+            throw new SQLException("词典无法读取，请检查词典文件与表结构", e);
+        }
     }
 
     private static String nz(String s) {

@@ -88,6 +88,8 @@ fa:
   vocab:
     dict-path: ${FA_VOCAB_DICT:dict/stardict.db}
     max-words: ${FA_VOCAB_MAX_WORDS:5000}
+    # 学习档案独立于可衰减的 Agent 记忆；默认包含在 data/ 备份中
+    notebook-file: ${FA_VOCAB_NOTEBOOK_FILE:data/vocab/notebook.json}
 
   # ---- 调用 LLM 的通用参数(超时 / 重试)----
   llm:

@@ -149,3 +149,23 @@ button.danger { color: #fff; }
     .vocab-page h1 { font-size: 24px; }
     .vocab-page .btn { font-size: 13px; padding: 10px 13px; }
 }
+
+/* 灯下细线图标：与文字同色，暖金只用于点缀和固定状态。 */
+.study-page .desk-icon { width: 19px; height: 19px; display: inline-block; flex: 0 0 auto; vertical-align: -.2em; pointer-events: none; }
+.study-page .mem-btn, .study-page .mini.new, .study-page #noteBtn, .study-page .vocab-btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.study-page .convs .mem-btn { width: 100%; justify-content: flex-start; }
+.study-page .convs .mem-btn .desk-icon { color: #d7bd88; }
+.study-page .mini.new .desk-icon { width: 14px; height: 14px; }
+.study-page .icon-btn { color: var(--brand); transition: background .15s; }
+.study-page .icon-btn:hover { background: #eae7d9; }
+.study-page .icon-btn:focus-visible { outline: 2px solid #9f793d; outline-offset: 3px; }
+.study-page .icon-btn .desk-icon { width: 21px; height: 21px; }
+.study-page .modal-head h2, .study-page .mem-core-head strong, .study-page .mem-conflict-head, .study-page .mem-scope label { display: inline-flex; align-items: center; gap: 9px; }
+.study-page .modal-head h2 .desk-icon, .study-page .mem-core-head .desk-icon { color: #9b7842; }
+.study-page .conv-tools .mini, .study-page .mem-tools .mini, .study-page .mem-item > .mini { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px; }
+.study-page .conv-tools .desk-icon, .study-page .mem-tools .desk-icon, .study-page .mem-item > .mini .desk-icon, .study-page .conv-share .desk-icon { width: 15px; height: 15px; }
+.study-page .mem-item > .mini { color: #777b6c; }
+.study-page .mem-item > .mini.pinned { color: #876626; background: #eee3c9; border-color: #cfba88; }
+.study-page .mem-item > .mini:hover { color: #fff; }
+.study-page .conv-share { display: inline-flex; align-items: center; }
+.study-page .conv-item:focus-within .conv-tools { display: flex; }

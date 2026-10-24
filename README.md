@@ -35,6 +35,8 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 
 ## 功能特性 / Features
 
+- **单词手记**：文章选词、频次与原句、缺失释义提示、按需简单英英/中文补充、手动修改、勾选导出、生词本与基础间隔复习；AI 内容和词典原文分开标注。使用与存储说明见 [docs/vocab.md](docs/vocab.md)。
+
 - **文档入库(三种来源)**:`.txt` / `.md` 文本、原生 PDF(文字层)、**扫描版 PDF / 图片(OCR)**;产出带页码出处的知识点
   - OCR 引擎可换:本地 **RapidOCR**(PP-OCRv4,纯 Java/CPU/离线,一页几秒)或**视觉模型**(能读公式,慢且有限流);
     本地读糊的页可**自动回退**视觉模型重读(见下方「OCR 引擎」)
@@ -101,7 +103,7 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **调用日志**:按天滚动到 `logs/api-YYYY-MM-DD.log`(经 SLF4J/Logback)
 - **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`/api/memory`(记忆的看 / 加 / 改 / 钉 / 删 / 导出)、`GET /api/health`
 - **Spring Boot 工程化**:可执行 fat jar(`java -jar`)、内嵌 Tomcat、内嵌日志(SLF4J/Logback)
-- **单元测试**:**285 个**,含 Boot 容器冒烟测试与配置绑定测试(不联网、秒级)
+- **自动测试**：包含 Boot 容器冒烟、配置绑定、词表与释义处理、生词本恢复、模型超时和访问保护；实际数量以当前 Surefire 报告为准，不调用真实模型 API。
 
 ---
 

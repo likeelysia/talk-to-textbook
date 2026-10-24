@@ -6,7 +6,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeSet;
+import java.util.Locale;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.text.Normalizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
@@ -31,7 +34,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class VocabService {
 
-    private static final Pattern WORD_PATTERN = Pattern.compile("[A-Za-z]+(?:'[A-Za-z]+)?");
+    private static final Pattern WORD_PATTERN = Pattern.compile("[A-Za-z]+(?:['-][A-Za-z]+)*");
+    public static final int MAX_ARTICLE_CHARS = 100_000;
 
     private final VocabDictionary dictionary;
     private final int maxWords;
@@ -44,37 +48,51 @@ public class VocabService {
 
     /** 提取单词并查词典。 */
     public ExtractResult extract(String article) {
-        if (article == null || article.isBlank()) {
-            throw new AgentException("请先粘贴文章");
-        }
-        TreeSet<String> words = new TreeSet<>();
-        Matcher m = WORD_PATTERN.matcher(article);
+        validateArticle(article);
+        String text = normalize(article);
+        Map<String, Occurrences> words = new java.util.TreeMap<>();
+        Matcher m = WORD_PATTERN.matcher(text);
         while (m.find()) {
-            words.add(m.group().toLowerCase());
+            String key = m.group().toLowerCase(Locale.ROOT);
+            if (key.length() > 80) throw new AgentException("发现异常长的单词，请检查文章或网址内容");
+            Occurrences occurrence = words.computeIfAbsent(key, k -> new Occurrences());
+            occurrence.count++;
+            if (occurrence.forms.size() < 16) occurrence.forms.add(m.group());
+            if (occurrence.examples.size() < 3) occurrence.examples.add(sentence(text, m.start(), m.end()));
+            if (words.size() > maxWords) throw new AgentException("单篇文章最多提取 " + maxWords + " 个不同单词");
         }
-        if (words.size() > maxWords) {
-            throw new AgentException("文章太长：提取到 " + words.size() + " 个单词，上限 " + maxWords);
-        }
+        if (words.isEmpty()) throw new AgentException("没有识别到英文单词，请检查文章内容");
 
         List<Word> out = new ArrayList<>();
         int notFound = 0;
-        for (String w : words) {
+        for (var item : words.entrySet()) {
+            String w = item.getKey();
+            Occurrences occurrence = item.getValue();
             String[] info;
+            String lookupWord = w;
+            String lemma = "";
             try {
                 info = dictionary.lookup(w);
-            } catch (Exception e) {
-                // 词典文件缺失是“整页都用不了”，要直接报给用户；单个词查失败才降级成“未收录”
-                if (e.getMessage() != null && e.getMessage().contains("词典文件不存在")) {
-                    throw new AgentException(e.getMessage());
+                if (info == null && w.contains("-")) {
+                    String joined = w.replace("-", "");
+                    info = dictionary.lookup(joined);
+                    if (info != null) lookupWord = joined;
                 }
-                info = null;
+                if (info != null && info.length > 5) {
+                    for (String exchange : info[5].split("/")) {
+                        if (exchange.startsWith("0:")) lemma = exchange.substring(2);
+                    }
+                }
+            } catch (Exception e) {
+                throw new AgentException("词典查询失败，请检查词典是否存在、完整且可读；本次没有生成词表", e);
             }
             if (info == null) {
                 notFound++;
-                out.add(new Word(w, "", "⚠ 未收录", "", "", ""));
-            } else {
-                out.add(new Word(w, info[0], info[1], info[2], tagToCn(info[3]), info[4]));
             }
+            out.add(new Word(w, info == null ? "" : info[0], info == null ? "" : info[1],
+                    info == null ? "" : info[2], info == null ? "" : tagToCn(info[3]), info == null ? "" : info[4],
+                    List.copyOf(occurrence.forms), occurrence.count, List.copyOf(occurrence.examples), lemma,
+                    lookupWord, info == null ? "NOT_FOUND" : "FOUND", null));
         }
         return new ExtractResult(words.size(), notFound, out);
     }
@@ -82,6 +100,12 @@ public class VocabService {
     /** 生成 Word：mode = cn（中文释义）或 en（英英释义）。 */
     public byte[] docx(String article, String mode) throws Exception {
         ExtractResult result = extract(article);
+        return docx(result.words(), mode);
+    }
+
+    /** Export the reviewed snapshot, including selections and explicitly generated explanations. */
+    public byte[] docx(List<Word> words, String mode) throws Exception {
+        if (words == null || words.isEmpty() || words.size() > maxWords) throw new AgentException("请选择要导出的单词，最多 " + maxWords + " 个");
         boolean en = "en".equalsIgnoreCase(mode);
 
         try (XWPFDocument doc = new XWPFDocument()) {
@@ -96,34 +120,36 @@ public class VocabService {
             XWPFParagraph sub = doc.createParagraph();
             sub.setAlignment(ParagraphAlignment.CENTER);
             XWPFRun subRun = sub.createRun();
-            subRun.setText("共 " + result.total() + " 个单词  ·  ECDICT 词库");
+            subRun.setText("共 " + words.size() + " 个单词 · 词典原文 / AI 补充 / 手动修改分别标注");
             subRun.setFontSize(10);
             subRun.setColor("808080");
 
             String[] headers = en
-                    ? new String[]{"序号", "单词", "音标", "英英释义"}
-                    : new String[]{"序号", "单词", "音标", "中文释义", "英文释义", "考试标签"};
-            XWPFTable table = doc.createTable(result.words().size() + 1, headers.length);
+                    ? new String[]{"序号", "单词 / 原形", "英文解释", "中文辅助", "来源原句"}
+                    : new String[]{"序号", "单词 / 原形", "音标", "中文释义", "考试标签", "来源原句"};
+            XWPFTable table = doc.createTable(words.size() + 1, headers.length);
             table.setWidth("100%");
             for (int c = 0; c < headers.length; c++) {
                 setCell(table, 0, c, headers[c], true, 11);
             }
 
             int row = 1;
-            for (Word w : result.words()) {
+            for (Word w : words) {
+                validateWord(w);
                 setCell(table, row, 0, String.valueOf(row), false, 10);
-                setCell(table, row, 1, w.w(), true, 11);
-                if ("⚠ 未收录".equals(w.cn())) {
-                    for (int c = 2; c < headers.length; c++) setCell(table, row, c, "", false, 10);
-                    setCell(table, row, 2, "⚠ 未收录", false, 10);
-                } else if (en) {
-                    setCell(table, row, 2, "/" + w.ph() + "/", false, 10);
-                    setCell(table, row, 3, formatEnglishDef(w.en(), w.pos()), false, 10);
+                setCell(table, row, 1, w.w() + (blank(w.lemma()) ? "" : " → " + w.lemma()), true, 11);
+                if (en) {
+                    String english = w.explanation() != null && !blank(w.explanation().en())
+                            ? "[" + w.explanation().source() + "] " + w.explanation().en()
+                            : blank(w.en()) ? "暂无英文释义" : "[词典原文] " + formatEnglishDef(w.en(), w.pos());
+                    setCell(table, row, 2, english, false, 10);
+                    setCell(table, row, 3, chinese(w), false, 10);
+                    setCell(table, row, 4, String.join("\n", w.examples()), false, 10);
                 } else {
-                    setCell(table, row, 2, "/" + w.ph() + "/", false, 10);
-                    setCell(table, row, 3, w.cn(), false, 10);
-                    setCell(table, row, 4, w.en(), false, 10);
-                    setCell(table, row, 5, w.tag(), false, 10);
+                    setCell(table, row, 2, blank(w.ph()) ? "" : "/" + w.ph() + "/", false, 10);
+                    setCell(table, row, 3, chinese(w), false, 10);
+                    setCell(table, row, 4, w.tag(), false, 10);
+                    setCell(table, row, 5, String.join("\n", w.examples()), false, 10);
                 }
                 row++;
             }
@@ -155,9 +181,10 @@ public class VocabService {
             case "v" -> "verb";
             case "j", "a", "s" -> "adjective";
             case "r", "ad" -> "adverb";
-            case "p" -> "preposition";
+            case "p", "pron" -> "pronoun";
+            case "i", "prep" -> "preposition";
             case "c" -> "conjunction";
-            case "i" -> "interjection";
+            case "interj" -> "interjection";
             case "m" -> "numeral";
             case "u" -> "auxiliary verb";
             case "t" -> "particle";
@@ -176,7 +203,7 @@ public class VocabService {
     /** 把英文释义按词性分组并编号，例如 "adjective. 1) ... 2) ...; noun. 1) ..."。 */
     static String formatEnglishDef(String def, String posField) {
         if (def == null || def.isBlank()) return "";
-        Pattern p = Pattern.compile("^(ad|n|v|s|a|r|j|p|c|i|m|u|t|x)\\.?\\s+(.*)$",
+        Pattern p = Pattern.compile("^(prep|pron|interj|ad|n|v|s|a|r|j|p|c|i|m|u|t|x)\\.?\\s+(.*)$",
                 Pattern.CASE_INSENSITIVE);
         Map<String, List<String>> groups = new LinkedHashMap<>();
         for (String line : def.split("\\R")) {
@@ -227,9 +254,73 @@ public class VocabService {
 
     // ==================== 返回结构 ====================
 
-    public record Word(String w, String ph, String cn, String en, String tag, String pos) {
+    public record Explanation(String cn, String en, String source, String level, String context) {
+        public Explanation(String cn, String en, String source, String level) { this(cn, en, source, level, ""); }
+    }
+
+    public record Word(String w, String ph, String cn, String en, String tag, String pos,
+                       List<String> forms, int count, List<String> examples, String lemma,
+                       String lookupWord, String lookupStatus, Explanation explanation) {
+        public Word {
+            forms = forms == null ? List.of() : List.copyOf(forms);
+            examples = examples == null ? List.of() : List.copyOf(examples);
+        }
+        public Word(String w, String ph, String cn, String en, String tag, String pos) {
+            this(w, ph, cn, en, tag, pos, List.of(w), 1, List.of(), "", w, "FOUND", null);
+        }
+        public Word withExplanation(Explanation value) {
+            return new Word(w, ph, cn, en, tag, pos, forms, count, examples, lemma, lookupWord, lookupStatus, value);
+        }
     }
 
     public record ExtractResult(int total, int notFound, List<Word> words) {
+    }
+
+    public static void validateArticle(String article) {
+        if (article == null || article.isBlank()) throw new AgentException("请先粘贴英文文章");
+        if (article.length() > MAX_ARTICLE_CHARS) throw new AgentException("单篇文章最多 " + MAX_ARTICLE_CHARS + " 字符，请分段处理");
+    }
+
+    public static void validateWord(Word word) {
+        if (word == null || word.w() == null || !WORD_PATTERN.matcher(word.w()).matches() || word.w().length() > 80)
+            throw new AgentException("单词格式不正确");
+        for (String field : new String[]{word.cn(), word.en(), word.ph(), word.pos(), word.tag(), word.lemma(), word.lookupWord()}) {
+            if (field != null && field.length() > 12000) throw new AgentException("词条内容过长");
+        }
+        if (word.examples().size() > 3 || word.examples().stream().anyMatch(s -> s == null || s.length() > 400))
+            throw new AgentException("来源原句过长，最多保存三条短句");
+        if (word.forms().size() > 100 || word.forms().stream().anyMatch(s -> s == null || s.length() > 80))
+            throw new AgentException("词形内容过长");
+        if (word.explanation() != null) {
+            for (String s : new String[]{word.explanation().cn(), word.explanation().en(), word.explanation().source(), word.explanation().level(), word.explanation().context()})
+                if (s != null && s.length() > 2000) throw new AgentException("补充释义过长");
+        }
+    }
+
+    static String normalize(String text) {
+        return Normalizer.normalize(text, Normalizer.Form.NFKC).replace('’', '\'').replace('‘', '\'')
+                .replace('ʼ', '\'').replace('‐', '-').replace('‑', '-');
+    }
+
+    private static String chinese(Word w) {
+        if (w.explanation() != null && !blank(w.explanation().cn())) return "[" + w.explanation().source() + "] " + w.explanation().cn();
+        return blank(w.cn()) ? "暂无中文释义" : "[词典原文] " + w.cn();
+    }
+
+    private static boolean blank(String s) { return s == null || s.isBlank(); }
+
+    private static String sentence(String text, int start, int end) {
+        int left = start, right = end;
+        while (left > 0 && start - left < 140 && ".!?\n".indexOf(text.charAt(left - 1)) < 0) left--;
+        while (right < text.length() && right - end < 140 && ".!?\n".indexOf(text.charAt(right)) < 0) right++;
+        if (right < text.length() && ".!?".indexOf(text.charAt(right)) >= 0) right++;
+        return (left > 0 && start - left >= 140 ? "…" : "") + text.substring(left, right).strip()
+                + (right < text.length() && right - end >= 140 ? "…" : "");
+    }
+
+    private static final class Occurrences {
+        int count;
+        final Set<String> forms = new LinkedHashSet<>();
+        final Set<String> examples = new LinkedHashSet<>();
     }
 }

@@ -25,6 +25,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/ingest", "/api/knowledge/source");
         // 收费模型入口:每个会话/IP 每分钟限流
         registry.addInterceptor(rateLimitInterceptor)
-                .addPathPatterns("/api/agent", "/api/agent/stream");
+                .addPathPatterns("/api/agent", "/api/agent/stream", "/api/vocab/explain");
     }
 }

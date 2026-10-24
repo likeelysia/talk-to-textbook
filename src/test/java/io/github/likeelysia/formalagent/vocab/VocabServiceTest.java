@@ -32,11 +32,14 @@ class VocabServiceTest {
         assertThat(result.words()).extracting(VocabService.Word::w)
                 .containsExactly("abandoned", "run", "the");
         assertThat(result.words().get(0).tag()).isEqualTo("托福");
-        assertThat(result.words().get(2).cn()).isEqualTo("⚠ 未收录");
+        assertThat(result.words().get(2).lookupStatus()).isEqualTo("NOT_FOUND");
+        assertThat(result.words().get(2).cn()).isEmpty();
     }
 
     @Test
     void formatsEnglishDefinitionsByPartOfSpeech() {
+        assertThat(VocabService.posFromField("p:100")).isEqualTo("pronoun");
+        assertThat(VocabService.posFromField("i:100")).isEqualTo("preposition");
         assertThat(VocabService.formatEnglishDef("s. forsaken\ns. free", ""))
                 .isEqualTo("adjective. 1) forsaken 2) free");
         assertThat(VocabService.formatEnglishDef("n. a score\nv. move fast", "n:15/v:85"))
