@@ -4,6 +4,67 @@
 
 > 重要：**尚未完成 Docker 构建和云端实测**。本文件只记录本机可复现的证据；Docker 未安装，目标服务器/域名/证书未提供。
 
+## 0. 发布收口（2026-10-24）
+
+### 0.1 发布版本与干净构建
+
+- 发布提交：`7829850`（含背词/单词手记、聊天图标和流式错误体修复）。
+- 干净 worktree：`tmp/release-7829850`（只含 Git 跟踪文件，不含 data/dict/knowledge/target）。
+- 构建/运行基线：Temurin JDK **17.0.20.1**。
+- 干净检出测试：
+
+```text
+mvn -q test
+TOTAL=439 FAIL=0 ERR=0 SKIP=1
+```
+
+跳过项是 `RetrievalEvalTest`：干净检出没有 `knowledge/base.json`，测试数据不存在，不是代码失败。工作区带真实知识库时该测试 0 跳过（439 通过 / 0 跳过）。
+
+- 发布 JAR：`dist/talk-to-textbook-0.1.0-7829850.jar`
+- SHA-256：`61C7793C3EA5476BF15923B913D36C14B742844731EA8959E770F15BA6B5144D`
+- 已核对 JAR 内包含 `study-icons.svg`、`vocab.js`、`vocab.css`、`VocabExplanationService.class`、`VocabNotebook.class`。
+- 旧 `target/talk-to-textbook-vocab-upgrade.jar` 不作为本轮部署依据。
+
+### 0.2 本地隔离运行验收
+
+环境：发布 JAR + JDK17，端口 `8098`；数据目录全部指向 `tmp/release-accept` 的隔离目录；词典只读指向项目 `dict/stardict.db`；不使用真实学习数据。
+
+- 未登录：`/api/conversations`、`/api/memory`、`/api/notes`、`/api/vocab/book` 均 **401**。
+- 登录 + CSRF：正常进入 `/study.html`，`/api/auth/me` 返回 `pengge`。
+- 会话/记忆：创建会话 `release-test`、写入一条记忆均 200；重启后仍能读到。
+- 背词：真实词典提取 **8 个单词**；保存到生词本；复习 `good` 后 `reviewCount=1 / streak=1`；Word 导出 **200**。
+- 背词页面浏览器冒烟（420×900）：`vocab.css`、`vocab.js` 加载成功，3 个页签正常；粘贴示例文章后显示 **9 个不同词条**、缺中文/英文各 0。
+- 笔记：在隔离会话里保存 1 条笔记；重启后仍为 **1 条**。
+- 进程重启后读取：笔记 1 条、生词本 `brown`、会话 2 个、记忆 1 条，全部保留。
+- 局域网：主机通过 `http://10.60.25.45:8098/login.html` 返回 200；**没有手机实机验证**。
+
+### 0.3 备份恢复到独立实例
+
+- 对 `tmp/release-accept` 执行停写备份，归档在 `tmp/release-backup`。
+- 恢复到 `tmp/release-restore` 空目录，校验和通过。
+- 用发布 JAR + 恢复目录另起实例（8098），登录后读到：笔记 1、生词 `brown`、会话 2、记忆 1。
+- 隔离目录没有 `knowledge/` 内容，恢复脚本提示 `Missing knowledge/base.json` 属于预期；真实项目数据没有被覆盖。
+
+### 0.4 真实模型 / Docker / 云端状态
+
+- **真实文字/图片模型：未执行**。本机没有 `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `FA_VISION_API_KEY`；`/api/vocab/explain` 在缺 Key 时返回明确 400，`/api/health` 的 vision 为 DOWN。不能把本地假模型或词典提取当作真实模型质量验收。
+- **Docker/Compose：未执行**。本机没有 `docker` 命令，只有部署文件；没有 `docker compose build/up` 证据。
+- **云端/HTTPS/手机：未执行**。没有服务器、域名、证书和可公网访问的部署地址；没有手机实机。
+- **资源**：本机 31.8 GB 内存；验收时 Java 进程工作集约 196 MB，llama-server 约 340 MB；这不是容器内存/云主机实测。
+
+### 0.5 八项验收表
+
+| # | 项目 | 状态 | 实际结果 / 证据 |
+|---|---|---|---|
+| 1 | 未登录不能读会话/记忆/笔记/生词 | ✅ 本地通过 | 4 个 GET 均 401（0.2） |
+| 2 | 登录/CSRF/限流正常，临时配置区分 | ✅ 本地通过 | 登录 200；POST 无 token 403；全量测试含 CSRF/限流；环境变量仅进程内 |
+| 3 | 文字/图片真实模型问答 + 出处 | ❌ 未执行 | 无模型 Key；只有词典/本地假模型证据 |
+| 4 | 旧词补原句；AI 中英文释义可用 | 🟡 部分 | 提取/保存/复习/Word 已过；AI 释义因无 Key 未验质量 |
+| 5 | 会话/记忆/笔记/生词/复习重启保留 | ✅ 进程重启 | 见 0.2；容器重启未执行 |
+| 6 | 备份恢复独立目录可读 | ✅ 通过 | 见 0.3；真实数据未覆盖 |
+| 7 | 手机通过部署地址登录/提问/生词本 | ❌ 未执行 | 只有局域网浏览器 200，无手机/域名 |
+| 8 | 资源、错误日志、版本、回滚 | 🟡 部分 | 版本/JAR/SHA/日志有；Docker 资源与云端回滚未实测 |
+
 ## 1. 自动测试
 
 ```text
