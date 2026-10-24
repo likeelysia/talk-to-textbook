@@ -10,15 +10,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
- * 给流式响应体加“总时限 + 空闲时限”。
+ * 给响应体加“总时限 + 空闲时限”。
  *
  * <p>HttpRequest.timeout 只管到拿到响应头;响应体是惰性读取的,模型吐完第一个 token
  * 后停住时,原实现会一直占着模型名额。这里用看门狗在超时后真正关闭响应流,
  * 让阻塞的读循环退出;名额由外层 try-with-resources 在读循环结束后释放,
  * 不会出现“名额先还了、后台还在读”的假并发。
  *
- * <p>空闲只看 data: 事件,不看 ": ping" 心跳 —— 上游可以一直发心跳但不产正文,
- * 那仍然是卡住。
+ * <p>成功 SSE 的空闲只看 data: 事件,不看 ": ping" 心跳;错误响应体不是 SSE,
+ * 空启用“收到任意一行错误正文”作为活动。
  */
 final class StreamReadGuard implements AutoCloseable {
 
@@ -26,6 +26,7 @@ final class StreamReadGuard implements AutoCloseable {
     private final long idleMillis;
     private final long totalMillis;
     private final long totalDeadline;
+    private final String idleLabel;
     private final ScheduledFuture<?> task;
     private final AtomicBoolean timedOut = new AtomicBoolean(false);
     private final AtomicReference<String> reason = new AtomicReference<>("");
@@ -33,10 +34,16 @@ final class StreamReadGuard implements AutoCloseable {
 
     StreamReadGuard(Stream<String> lines, long startedAt, long idleMillis, long totalMillis,
                     ScheduledExecutorService scheduler) {
+        this(lines, startedAt, idleMillis, totalMillis, scheduler, "data 事件");
+    }
+
+    StreamReadGuard(Stream<String> lines, long startedAt, long idleMillis, long totalMillis,
+                    ScheduledExecutorService scheduler, String idleLabel) {
         this.lines = lines;
         this.idleMillis = Math.max(100, idleMillis);
         this.totalMillis = Math.max(100, totalMillis);
         this.totalDeadline = startedAt + this.totalMillis;
+        this.idleLabel = idleLabel;
         this.lastDataAt.set(System.currentTimeMillis());
         long interval = Math.max(50, Math.min(1000, Math.min(this.idleMillis, totalMillis) / 4));
         this.task = scheduler.scheduleAtFixedRate(this::check, interval, interval, TimeUnit.MILLISECONDS);
@@ -44,6 +51,11 @@ final class StreamReadGuard implements AutoCloseable {
 
     /** 每收到一个 data: 行调用一次;心跳注释不调用。 */
     void touchData() {
+        touch();
+    }
+
+    /** 错误响应体每读到一行调用一次。 */
+    void touch() {
         lastDataAt.set(System.currentTimeMillis());
     }
 
@@ -62,7 +74,7 @@ final class StreamReadGuard implements AutoCloseable {
         if (now >= totalDeadline) {
             timeout("流式响应超过总时限(" + (totalMillis / 1000) + " 秒)");
         } else if (now - lastDataAt.get() >= idleMillis) {
-            timeout("流式响应空闲超时(" + (idleMillis / 1000) + " 秒没有收到 data 事件)");
+            timeout("流式响应空闲超时(" + (idleMillis / 1000) + " 秒没有收到 " + idleLabel + ")");
         }
     }
 

@@ -80,6 +80,101 @@ class DeepSeekStreamTimeoutTest {
     }
 
     @Test
+    void errorBodiesAreBoundedFor400429And503() throws Exception {
+        for (int code : List.of(400, 429, 503)) {
+            release = new CountDownLatch(1);
+            String url = start(exchange -> {
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(code, 0);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write("{\"error\":\"busy\"}\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    release.await(8, TimeUnit.SECONDS);
+                }
+            });
+            ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+            DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 1, 5);
+            long started = System.currentTimeMillis();
+            assertThatThrownBy(() -> client.chatWithToolsStream(messages(), List.of(), s -> {}))
+                    .isInstanceOf(AgentException.class)
+                    .hasMessageContaining("错误响应读取超时");
+            assertThat(System.currentTimeMillis() - started).isLessThan(5000);
+            assertThat(limiter.availableTotal()).isEqualTo(1);
+            release.countDown();
+            server.stop(0);
+            server = null;
+        }
+    }
+
+    @Test
+    void errorHeadersWithoutBodyStillTimeOut() throws Exception {
+        String url = start(exchange -> {
+            exchange.sendResponseHeaders(503, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.flush();                 // 只把响应头发出去,正文一个字节都不写
+                Thread.sleep(5000);
+            }
+        });
+        ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+        DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 1, 5);
+        long started = System.currentTimeMillis();
+        assertThatThrownBy(() -> client.chatWithToolsStream(messages(), List.of(), s -> {}))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("错误响应读取超时");
+        assertThat(System.currentTimeMillis() - started).isLessThan(5000);
+        assertThat(limiter.availableTotal()).isEqualTo(1);
+    }
+
+    @Test
+    void errorBodyWithoutNewlineStillTimesOut() throws Exception {
+        String url = start(exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write("{\"error\":".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Thread.sleep(5000);
+            }
+        });
+        ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+        DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 1, 5);
+        long started = System.currentTimeMillis();
+        assertThatThrownBy(() -> client.chatWithToolsStream(messages(), List.of(), s -> {}))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("错误响应读取超时");
+        assertThat(System.currentTimeMillis() - started).isLessThan(5000);
+        assertThat(limiter.availableTotal()).isEqualTo(1);
+    }
+
+    @Test
+    void repeatedErrorTimeoutsDoNotLeakPermitAndNextRequestReachesServer() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger hits = new java.util.concurrent.atomic.AtomicInteger();
+        String url = start(exchange -> {
+            int n = hits.incrementAndGet();
+            if (n <= 3) {
+                exchange.sendResponseHeaders(503, 0);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write("{\"error\":\"busy\"}\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    Thread.sleep(3000);
+                }
+                return;
+            }
+            sse(exchange, data("{\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}") + data("[DONE]"));
+        });
+        ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+        DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 1, 5);
+        for (int i = 0; i < 3; i++) {
+            assertThatThrownBy(() -> client.chatWithToolsStream(messages(), List.of(), s -> {}))
+                    .isInstanceOf(AgentException.class);
+            assertThat(limiter.availableTotal()).isEqualTo(1);
+        }
+        var turn = client.chatWithToolsStream(messages(), List.of(), s -> {});
+        assertThat(turn.content()).isEqualTo("ok");
+        assertThat(hits.get()).isGreaterThanOrEqualTo(4);
+    }
+
+    @Test
     void firstTokenThenStallTimesOutAndReleasesPermit() throws Exception {
         release = new CountDownLatch(1);
         String url = start(exchange -> {

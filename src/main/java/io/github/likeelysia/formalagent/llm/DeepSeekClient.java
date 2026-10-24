@@ -28,7 +28,6 @@ import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +45,10 @@ public class DeepSeekClient implements LlmClient {
 
     /** 服务端结束标记。 */
     private static final String DONE = "[DONE]";
+
+    /** 错误体只读一小段,防止服务端返回整页 HTML 或无限流。 */
+    private static final int ERROR_BODY_MAX_LINES = 20;
+    private static final int ERROR_BODY_MAX_CHARS = 4096;
 
     private final HttpClient client;                     // 重对象:构造时建一份,复用
     private final ObjectMapper mapper;                   // ← 容器注入的统一 JSON 序列化器
@@ -264,7 +267,18 @@ public class DeepSeekClient implements LlmClient {
 
         int code = response.statusCode();
         if (code < 200 || code >= 300) {
-            String errorBody = joinFirstLines(response.body());
+            String errorBody;
+            // 错误响应体也必须受总时限/空闲时限保护:非 2xx 也可能是“一行 JSON 后一直不结束”。
+            try (StreamReadGuard guard = new StreamReadGuard(
+                    response.body(), start, streamIdleTimeoutMillis, streamTotalTimeoutMillis,
+                    streamGuardScheduler, "错误响应数据")) {
+                errorBody = readErrorBody(response.body(), guard);
+            } catch (ErrorBodyTimeoutException e) {
+                if (code == 429 || code >= 500) {
+                    throw new TransientApiException("DeepSeek 错误响应读取超时(" + code + "):" + e.getMessage(), e);
+                }
+                throw new AgentException("DeepSeek 错误响应读取超时(" + code + "):" + e.getMessage(), e);
+            }
             ApiLogger.record(config.deepseek().model(), code, System.currentTimeMillis() - start,
                     body.length(), errorBody.length());
             if (code == 429 || code >= 500) {
@@ -399,10 +413,44 @@ public class DeepSeekClient implements LlmClient {
         return ApiKeys.resolve(config.deepseek().apiKey(), config.deepseek().apiKeyEnv());
     }
 
-    /** 错误体不能无限读:取前几行就够了。 */
-    private static String joinFirstLines(Stream<String> lines) {
-        try (lines) {
-            return lines.limit(20).collect(Collectors.joining(" "));
+    /** 错误体不能无限读:最多 20 行/4096 字符;读的每一行都刷新空闲计时。 */
+    private static String readErrorBody(Stream<String> lines, StreamReadGuard guard) {
+        StringBuilder out = new StringBuilder();
+        int lineCount = 0;
+        try {
+            Iterator<String> it = lines.iterator();
+            while (lineCount < ERROR_BODY_MAX_LINES && out.length() < ERROR_BODY_MAX_CHARS) {
+                if (guard.isTimedOut()) break;
+                if (!it.hasNext()) break;
+                String line = it.next();
+                guard.touch();
+                lineCount++;
+                if (out.length() > 0) out.append(' ');
+                int room = ERROR_BODY_MAX_CHARS - out.length();
+                if (line.length() > room) {
+                    out.append(line, 0, room);
+                    break;
+                }
+                out.append(line);
+            }
+        } catch (RuntimeException e) {
+            if (guard.isTimedOut()) {
+                throw new ErrorBodyTimeoutException(guard.reason(), e);
+            }
+            throw e;
+        } finally {
+            lines.close();
+        }
+        if (guard.isTimedOut()) {
+            throw new ErrorBodyTimeoutException(guard.reason(), null);
+        }
+        return out.toString();
+    }
+
+    /** 非 2xx 响应体超时;由调用方按状态码决定可重试还是直接失败。 */
+    private static final class ErrorBodyTimeoutException extends RuntimeException {
+        ErrorBodyTimeoutException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
