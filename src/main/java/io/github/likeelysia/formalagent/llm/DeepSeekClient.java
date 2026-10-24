@@ -14,6 +14,7 @@ import io.github.likeelysia.formalagent.llm.dto.ChatResponse;
 import io.github.likeelysia.formalagent.llm.dto.ToolCall;
 import io.github.likeelysia.formalagent.llm.dto.ToolDefinition;
 import io.github.likeelysia.formalagent.log.ApiLogger;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -24,6 +25,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -48,19 +51,38 @@ public class DeepSeekClient implements LlmClient {
     private final ObjectMapper mapper;                   // ← 容器注入的统一 JSON 序列化器
     private final AppConfig config;                      // ← 配置也由容器塞进来
     private final ModelConcurrencyLimiter limiter;
+    private final long streamIdleTimeoutMillis;
+    private final long streamTotalTimeoutMillis;
+    private final ScheduledExecutorService streamGuardScheduler;
 
     public DeepSeekClient(AppConfig config, ObjectMapper mapper) {
-        this(config, mapper, new ModelConcurrencyLimiter(2, 1, 10));
+        this(config, mapper, new ModelConcurrencyLimiter(2, 1, 10), 60, 300);
+    }
+
+    public DeepSeekClient(AppConfig config, ObjectMapper mapper, ModelConcurrencyLimiter limiter) {
+        this(config, mapper, limiter, 60, 300);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public DeepSeekClient(AppConfig config, ObjectMapper mapper, ModelConcurrencyLimiter limiter) {
+    public DeepSeekClient(AppConfig config, ObjectMapper mapper, ModelConcurrencyLimiter limiter,
+                          @org.springframework.beans.factory.annotation.Value(
+                                  "${fa.llm.stream-idle-timeout-seconds:60}") long idleSeconds,
+                          @org.springframework.beans.factory.annotation.Value(
+                                  "${fa.llm.stream-total-timeout-seconds:300}") long totalSeconds) {
         this.config = config;
         this.mapper = mapper;
         this.limiter = limiter;
+        this.streamIdleTimeoutMillis = Math.max(1, idleSeconds) * 1000L;
+        this.streamTotalTimeoutMillis = Math.max(1, totalSeconds) * 1000L;
+        this.streamGuardScheduler = StreamReadGuard.daemonScheduler();
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(config.llm().connectTimeoutSeconds()))
                 .build();
+    }
+
+    @PreDestroy
+    void shutdownStreamGuard() {
+        streamGuardScheduler.shutdownNow();
     }
 
     @Retryable(
@@ -118,10 +140,24 @@ public class DeepSeekClient implements LlmClient {
     @Override
     public AssistantTurn chatWithToolsStream(List<AgentMessage> messages, List<ToolDefinition> tools,
                                              Consumer<String> onDelta) {
+        return chatWithToolsStream(messages, tools, onDelta, () -> false);
+    }
+
+    @Retryable(
+            value = TransientApiException.class,
+            maxAttemptsExpression = "${fa.llm.max-attempts:5}",
+            backoff = @Backoff(
+                    delayExpression = "${fa.llm.retry-base-ms:2000}",
+                    maxDelayExpression = "${fa.llm.retry-max-ms:20000}",
+                    multiplier = 2.0,
+                    random = false))
+    @Override
+    public AssistantTurn chatWithToolsStream(List<AgentMessage> messages, List<ToolDefinition> tools,
+                                             Consumer<String> onDelta, BooleanSupplier cancelled) {
         ChatRequest request = new ChatRequest(
                 config.deepseek().model(), messages,
                 config.deepseek().maxTokens(), null, tools, Boolean.TRUE);
-        return postStream(request, onDelta);
+        return postStream(request, onDelta, cancelled);
     }
 
     /** 所有文字模型请求的唯一入口:名额覆盖完整 HTTP 调用(含重试)。 */
@@ -185,13 +221,18 @@ public class DeepSeekClient implements LlmClient {
      * 我们只要认 {@code data:} 开头的行 —— 解析是<b>惰性</b>的,模型吐一行我们就收一行,
      * 这才是"流式"的意义(换成 {@code ofString()} 会等到全部生成完,白搭)。
      */
-    private AssistantTurn postStream(ChatRequest request, Consumer<String> onDelta) {
+    private AssistantTurn postStream(ChatRequest request, Consumer<String> onDelta,
+                                     BooleanSupplier cancelled) {
         try (ModelConcurrencyLimiter.Permit ignored = limiter.acquire()) {
-            return postStreamWithPermit(request, onDelta);
+            return postStreamWithPermit(request, onDelta, cancelled);
         }
     }
 
-    private AssistantTurn postStreamWithPermit(ChatRequest request, Consumer<String> onDelta) {
+    private AssistantTurn postStreamWithPermit(ChatRequest request, Consumer<String> onDelta,
+                                               BooleanSupplier cancelled) {
+        if (cancelled != null && cancelled.getAsBoolean()) {
+            throw new AgentException("用户已取消本次回答");
+        }
         String apiKey = apiKey();
         String body;
         try {
@@ -232,11 +273,17 @@ public class DeepSeekClient implements LlmClient {
             throw new AgentException("DeepSeek 返回错误(" + code + "):" + abbreviate(errorBody));
         }
 
-        return consume(response.body(), onDelta, start, body.length());
+        try (StreamReadGuard guard = new StreamReadGuard(
+                response.body(), start, streamIdleTimeoutMillis, streamTotalTimeoutMillis,
+                streamGuardScheduler)) {
+            return consume(response.body(), onDelta, start, body.length(), guard, cancelled);
+        }
     }
 
     /** 逐行消费 SSE:累积正文 + 拼接工具调用碎片。 */
-    private AssistantTurn consume(Stream<String> lines, Consumer<String> onDelta, long start, int requestLength) {
+    private AssistantTurn consume(Stream<String> lines, Consumer<String> onDelta, long start,
+                                  int requestLength, StreamReadGuard guard,
+                                  BooleanSupplier cancelled) {
         StringBuilder content = new StringBuilder();
         Map<Integer, PartialCall> partials = new LinkedHashMap<>();
         boolean emitted = false;
@@ -244,11 +291,18 @@ public class DeepSeekClient implements LlmClient {
         try {
             Iterator<String> it = lines.iterator();
             while (it.hasNext()) {
+                if (guard.isTimedOut()) {
+                    throw new AgentException(guard.reason());
+                }
+                if (cancelled != null && cancelled.getAsBoolean()) {
+                    throw new AgentException("用户已取消本次回答");
+                }
                 String line = it.next().strip();
                 // 只认 data: 行 —— ": ping" 这类心跳注释、event:/id: 行一律跳过
                 if (line.isEmpty() || !line.startsWith(DATA_PREFIX)) {
                     continue;
                 }
+                guard.touchData();
                 String payload = line.substring(DATA_PREFIX.length()).strip();
                 if (DONE.equals(payload)) {
                     break;
@@ -268,9 +322,18 @@ public class DeepSeekClient implements LlmClient {
                     }
                 }
             }
+            if (guard.isTimedOut()) {
+                throw new AgentException(guard.reason());
+            }
         } catch (IOException e) {                          // JsonProcessingException 是它的子类
+            if (guard.isTimedOut()) {
+                throw new AgentException(guard.reason(), e);
+            }
             throw streamFailure(emitted, "流式解析失败:" + e.getMessage(), e);
         } catch (RuntimeException e) {                     // 连接中途断开等
+            if (guard.isTimedOut()) {
+                throw new AgentException(guard.reason(), e);
+            }
             throw streamFailure(emitted, "流式读取失败:" + e.getMessage(), e);
         } finally {
             lines.close();

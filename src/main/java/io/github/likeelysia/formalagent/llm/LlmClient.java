@@ -6,6 +6,7 @@ import io.github.likeelysia.formalagent.llm.dto.AgentMessage;
 import io.github.likeelysia.formalagent.llm.dto.AssistantTurn;
 import io.github.likeelysia.formalagent.llm.dto.ToolDefinition;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /** 大模型客户端:给我对话历史,还我模型回复。 */
@@ -46,5 +47,14 @@ public interface LlmClient {
             onDelta.accept(turn.content());
         }
         return turn;
+    }
+
+    /**
+     * 带取消信号的流式版。默认实现忽略取消信号,保持旧实现/假客户端兼容;
+     * 真实客户端会在读循环里检查,断开后尽快停止下游读取。
+     */
+    default AssistantTurn chatWithToolsStream(List<AgentMessage> messages, List<ToolDefinition> tools,
+                                              Consumer<String> onDelta, BooleanSupplier cancelled) {
+        return chatWithToolsStream(messages, tools, onDelta);
     }
 }

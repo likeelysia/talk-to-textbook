@@ -39,6 +39,8 @@
 | `FA_EMBEDDING_URL` | embedding 地址 | 是 |
 | `FA_EMBEDDING_MODEL` | 模型标识 | 是 |
 | `FA_EMBEDDING_API_KEY` | 云端 embedding 的 Bearer | 云端必填 |
+| `FA_STREAM_IDLE_TIMEOUT_SECONDS` | 流式响应空闲时限（只看 data） | 默认 60 |
+| `FA_STREAM_TOTAL_TIMEOUT_SECONDS` | 流式响应总时限 | 默认 300 |
 | `FA_MODEL_MAX_CONCURRENT` | 所有模型调用总并发 | 建议 2 |
 | `FA_MODEL_BACKGROUND_CONCURRENT` | 后台提炼最多占用 | 建议 1 |
 | `FA_MODEL_ACQUIRE_TIMEOUT_SECONDS` | 等模型名额上限 | 默认 10 |
@@ -197,8 +199,9 @@ bash scripts/restore.sh backups/talk-to-textbook-YYYYmmdd-HHMMSS-*.tar.gz /tmp/r
 # 检查 /tmp/restore-test/knowledge/base.json、data/conversations、data/memory 等
 ```
 
-- 脚本会生成 `.manifest.txt` 和 `.sha256`；恢复前必须校验通过。
+- 脚本会生成 `.manifest.txt` 和 `.sha256`；恢复前必须校验通过。sidecar 只记录摘要和归档 basename，归档+校验文件一起搬到别的目录/机器仍可恢复。
 - 归档失败、校验失败、目标非空都会非零退出；服务恢复命令在 `trap` 里执行。
+- **服务恢复失败不再算成功**：归档已经生成也会保留，但脚本会以 6 退出，并同时打印“归档错误/恢复错误”两类信息（如果有）。按提示手动检查服务。
 - 真实恢复要先停服务，确认隔离目录内容后再同步回项目；不要直接覆盖真实数据。
 - 没有 `STOP_CMD`/`START_CMD` 时脚本**拒绝归档**，不再做“运行中直接 tar”。
 - 个人版只有一个 app 写入实例；如果同时开了 CLI 灌库/导入，也要一并停掉。`STOP_WAIT_SECONDS`（默认 3 秒）给优雅停机和后台任务收尾留时间。
@@ -211,7 +214,7 @@ bash scripts/restore.sh backups/talk-to-textbook-YYYYmmdd-HHMMSS-*.tar.gz /tmp/r
 .\scripts\restore.ps1 -Archive .\backups\talk-to-textbook-....tar.gz -Target .\tmp\restore-test
 ```
 
-PowerShell 备份同样要求停写命令，并显式检查 `tar` 退出码；恢复会校验 `.sha256`。
+PowerShell 备份同样要求停写命令，并显式检查 `tar` 的原生命令退出码；恢复会校验 `.sha256`。启动命令抛异常或返回非零时，归档保留但脚本非零退出；归档和恢复同时失败时两类错误都会打印。
 
 ## 7. 资源边界
 
@@ -219,6 +222,8 @@ PowerShell 备份同样要求停写命令，并显式检查 `tar` 退出码；�
 |---|---|---|
 | SSE 工作线程 | 4 | `FA_STREAM_WORKERS` |
 | SSE 排队 | 8 | `FA_STREAM_QUEUE` |
+| 流式响应总时限 | 300 秒 | `FA_STREAM_TOTAL_TIMEOUT_SECONDS` |
+| 流式响应空闲时限 | 60 秒（只看 `data:`，心跳不算） | `FA_STREAM_IDLE_TIMEOUT_SECONDS` |
 | 所有文字/视觉/摘要/提炼合计并发 | 2 | `FA_MODEL_MAX_CONCURRENT` |
 | 后台提炼最多占用 | 1（总预算内） | `FA_MODEL_BACKGROUND_CONCURRENT` |
 | 等模型名额上限 | 10 秒 | `FA_MODEL_ACQUIRE_TIMEOUT_SECONDS` |
@@ -234,6 +239,8 @@ PowerShell 备份同样要求停写命令，并显式检查 `tar` 退出码；�
 超限反馈：429（问答/登录限流）、503（模型名额等不到）、400（参数/模型业务错）、SSE `error` 事件（流内失败）。
 
 模型并发预算放在**真实 HTTP 调用层**（`DeepSeekClient.post/postStream`、`OpenAiCompatibleVisionClient.ask`），不是包在某一轮问答外面；因此文字、图片、滚动摘要、记忆提炼/对账共用同一份名额，流式请求一直占到流结束。后台提炼只占 `FA_MODEL_BACKGROUND_CONCURRENT`，不会把交互全挤掉；异常/超时/取消都由 try-with-resources 归还。
+
+流式响应体另有看门狗：总时限从发请求算起，空闲时限只看 `data:` 事件（`: ping` 心跳不算）。任一超时都会关闭响应流、结束读循环并释放模型名额；不会出现“名额先还了、后台还在读”。用户取消/心跳发现连接断开时，读取循环会在下一个检查点停手。
 
 CSRF：Session 认证下默认开启 Spring Security CSRF；登录表单/退出表单带 `_csrf` 隐藏字段，SPA 的 POST/PUT/DELETE/上传/SSE 带 `X-XSRF-TOKEN` 头（Cookie `XSRF-TOKEN`）。缺失/错误凭证返回 403。
 

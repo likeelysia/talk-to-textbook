@@ -78,6 +78,10 @@
         error.textContent = '尝试次数过多，请稍等一会儿再试。';
         error.hidden = false;
     }
+    if (params.has('expired')) {
+        error.textContent = '登录已过期，请重新登录。';
+        error.hidden = false;
+    }
 
     const form = document.querySelector('form[action="/login"]');
     const csrfInputName = '_csrf';

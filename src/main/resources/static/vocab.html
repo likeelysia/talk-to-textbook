@@ -365,6 +365,7 @@ The sun rises over the quiet village. Every morning, the farmers walk to their f
 
 
 
+<script src="/vocab-api.js"></script>
 <script>
 let currentWords = [];
 let mode = 'cn';   // cn = 中文（四六级），en = 英英（剑桥风格）
@@ -425,12 +426,7 @@ async function extract() {
   $('btnExtract').disabled = true;
 
   try {
-    const resp = await fetch('/api/vocab/extract', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json; charset=UTF-8'},
-      body: JSON.stringify({article: article})
-    });
-    const data = await resp.json();
+    const data = await authJson('/api/vocab/extract', {article: article});
     if (data.error) { setStatus('❌ ' + data.error, '#d32f2f'); return; }
 
     currentWords = data.words;
@@ -593,7 +589,7 @@ async function downloadDocx() {
   setStatus('⏳ 正在生成 Word 文档...', '#666');
   $('btnDownload').disabled = true;
   try {
-    const resp = await fetch('/api/vocab/docx', {
+    const resp = await authFetch('/api/vocab/docx', {
       method: 'POST',
       headers: {'Content-Type': 'application/json; charset=UTF-8'},
       body: JSON.stringify({article: article, mode: mode})
@@ -611,7 +607,8 @@ async function downloadDocx() {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // 给浏览器一点时间真正开始下载,再释放 blob URL
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     setStatus('✅ 下载已开始！浏览器底部/下载列表里可以找到 Word 文件', '#2e7d32');
   } catch (e) {
     setStatus('❌ 生成失败: ' + e.message, '#d32f2f');

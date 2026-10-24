@@ -13,6 +13,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,9 +78,27 @@ public class SseStreamer {
      * 它抛出的任何异常都变成一条 {@code error} 事件,最后无论成败都收尾。
      */
     public void start(SseEmitter emitter, Consumer<SseEmitter> work) {
-        ScheduledFuture<?> heartbeat = pinger.scheduleAtFixedRate(
-                () -> quiet(() -> emitter.send(SseEmitter.event().comment("ping"))),
-                PING_INTERVAL_MS, PING_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        start(emitter, work, () -> { });
+    }
+
+    /**
+     * 额外接收断开通知:心跳发送失败时说明客户端已经走了,通知上层把取消标记置位,
+     * 让模型读循环在下一次检查时停手。
+     */
+    public void start(SseEmitter emitter, Consumer<SseEmitter> work, Runnable onDisconnect) {
+        AtomicReference<ScheduledFuture<?>> heartbeatRef = new AtomicReference<>();
+        ScheduledFuture<?> heartbeat = pinger.scheduleAtFixedRate(() -> {
+            try {
+                emitter.send(SseEmitter.event().comment("ping"));
+            } catch (Exception e) {
+                onDisconnect.run();
+                ScheduledFuture<?> current = heartbeatRef.get();
+                if (current != null) {
+                    current.cancel(false);
+                }
+            }
+        }, PING_INTERVAL_MS, PING_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        heartbeatRef.set(heartbeat);
 
         String requestId = MDC.get(RequestIdFilter.MDC_KEY);
         Runnable task = () -> {

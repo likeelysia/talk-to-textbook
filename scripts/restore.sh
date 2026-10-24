@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 恢复备份到隔离目录:先校验 checksum,再解压;绝不覆盖非空目录。
+# 恢复备份到隔离目录:校验“本次传入的归档”的摘要,再解压;绝不覆盖非空目录。
 # 用法: bash scripts/restore.sh <备份.tar.gz> <空目标目录>
 set -euo pipefail
 
@@ -19,9 +19,21 @@ if [[ -e "$TARGET" && -n "$(ls -A "$TARGET" 2>/dev/null || true)" ]]; then
   exit 3
 fi
 
-echo "校验归档..."
-if ! sha256sum -c "$ARCHIVE.sha256"; then
-  echo "校验失败,拒绝恢复。" >&2
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "系统没有 sha256sum,无法校验;拒绝恢复。" >&2
+  exit 4
+fi
+
+# sidecar 只取第一列摘要,直接和本次传入的 ARCHIVE 比;
+# 不按 sidecar 里的旧路径找文件,所以归档+sidecar 搬到别的目录/机器仍可用。
+EXPECTED="$(awk 'NR==1{print $1}' "$ARCHIVE.sha256" | tr 'A-F' 'a-f')"
+if ! [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "校验文件格式错误(需要 64 位 SHA-256): $ARCHIVE.sha256" >&2
+  exit 4
+fi
+ACTUAL="$(sha256sum "$ARCHIVE" | awk '{print $1}' | tr 'A-F' 'a-f')"
+if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+  echo "校验失败:期望 $EXPECTED,实际 $ACTUAL;拒绝恢复。" >&2
   exit 4
 fi
 

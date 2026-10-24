@@ -82,7 +82,8 @@ public class AgentService {
      */
     public AgentResult runStream(String question, List<AgentMessage> history, StreamSink sink) {
         return loop(question, history, sink,
-                (messages, definitions) -> llm.chatWithToolsStream(messages, definitions, sink::onDelta));
+                (messages, definitions) -> llm.chatWithToolsStream(
+                        messages, definitions, sink::onDelta, sink::isCancelled));
     }
 
     /** "这一轮怎么从模型那儿拿到回复" —— 一次性的,还是逐字回调的。 */

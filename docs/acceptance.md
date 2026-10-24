@@ -1,6 +1,6 @@
 # 第一阶段返工验收记录（本地演练）
 
-日期：2026-10-23（返工轮） ｜ 代码基线：`6e46d2d` + 本轮修改 ｜ 环境：Windows 11、JDK 17 兼容运行（测试 JVM 25）、本地 llama.cpp 8090
+日期：2026-10-24（第二轮返工轮） ｜ 代码基线：`e1e0616` + `f85872f` + 本轮修改 ｜ 环境：Windows 11、JDK 17 兼容运行（测试 JVM 25）、本地 llama.cpp 8090
 
 > 重要：**尚未完成 Docker 构建和云端实测**。本文件只记录本机可复现的证据；Docker 未安装，目标服务器/域名/证书未提供。
 
@@ -8,11 +8,12 @@
 
 ```text
 mvn -q test
-TOTAL=408 FAIL=0 ERR=0 SKIP=0
+TOTAL=416 FAIL=0 ERR=0 SKIP=0
 ```
 
 本轮新增/修改的重点：
 
+- `DeepSeekStreamTimeoutTest`（8 条）：首 token 后停住、只有心跳、总时限、无 DONE、上游错误、用户取消、正常结束、连续超时复用名额；验证超时后名额可再次取得。
 - `SecurityAccessTest`（4 条）：页面/API 访问保护、联系页静态资源匿名可访问、连续错误口令被登录入口限流、状态变更缺 CSRF 被拒。
 - `LoginAttemptServiceTest`（2 条）：IP/账号维度退避、退避到期恢复、成功登录清除计数。
 - `RateLimitInterceptorTest`（2 条）：窗口内超限 429；同一账号换新会话仍被拦。
@@ -44,6 +45,21 @@ TOTAL=408 FAIL=0 ERR=0 SKIP=0
 - 3 个后台作用域任务，后台实际最大并发 **1**；作用域结束后 `ModelCallContext.isBackground()=false`。
 - 人为在持有名额时抛异常，名额恢复为 1/1。
 
+### 流式响应体超时（本轮新增）
+
+- **总时限**：从发出请求算起，默认 300 秒（`FA_STREAM_TOTAL_TIMEOUT_SECONDS`）。
+- **空闲时限**：连续没有 `data:` 事件，默认 60 秒（`FA_STREAM_IDLE_TIMEOUT_SECONDS`）；`: ping` 心跳不算活动，故意用“只有心跳”验证过会超时。
+- 看门狗在超时后真正 `close()` 响应流，阻塞的读循环退出，外层 `try-with-resources` 再归还模型 Permit；不是提前还名额让后台继续读。
+- 用户取消/心跳发现连接断开时，`StreamSink.isCancelled()` 传给真实客户端，读循环在下一个检查点退出；断流超时也会走同一条关闭路径。
+- 本地假模型实测 7 个场景，均不调用真实 API：
+  - 首 token 后停住 → `空闲超时`，名额恢复；
+  - 只有 `: ping` → `空闲超时`；
+  - 持续有 data 但总时长超限 → `总时限`；
+  - 不发 DONE 但上游正常关闭 → 正常返回；
+  - 上游 500 → 业务错误，名额恢复；
+  - 用户取消 → 取消错误，名额恢复；
+  - 正常 DONE → 正常返回。
+
 ## 3. 登录入口防暴力尝试
 
 - 过滤器在 Spring Security 登录过滤器之前执行（`@Order(HIGHEST_PRECEDENCE)`），不是 MVC 拦截器。
@@ -66,6 +82,20 @@ TOTAL=408 FAIL=0 ERR=0 SKIP=0
   - 带 token 的 SSE POST → 200 `text/event-stream`。
   - 带 token 的退出登录 → 302 `/`；随后 `/api/auth/me` → 401。
   - 无 CSRF 的 `POST /logout` → 403（MockMvc）。
+
+### 背词页 CSRF（本轮新增）
+
+- 新增独立 `vocab-api.js`，不加载聊天页 `app.js`；从 `XSRF-TOKEN` Cookie 读 token，写请求带 `X-XSRF-TOKEN`。
+- 首次 Cookie 不存在时向 `/api/auth/csrf` 要一次；登录后 token 轮换由每次请求重新读 Cookie 处理。
+- 401：跳 `/login.html?expired=1`，登录页显示“登录已过期，请重新登录”。
+- 403：明确提示“安全校验失败，请刷新页面后重新操作”，**不自动重放 POST**（提取/生成 Word 可能已经执行过）。
+- 真实浏览器操作（Edge CDP，已登录）：
+  - `/vocab.html` 提取文章 → 8 个单词，未收录 0；
+  - 切换英英释义 → 按钮文案变化；
+  - 筛选 `fox` → 英英列表 1 条，`精确匹配 1 / 8`；
+  - 点击“导出分享” → 前端进入成功提示；服务端 `/api/vocab/docx` 独立验证 200，`Content-Type` 为 docx，大小 4668 字节。
+  - 无 CSRF 的 `/api/vocab/extract` → 403；错误 token → 403；正确 token → 200（8 个单词）。
+- 本机有 `dict/stardict.db`，所以真实提取/导出已执行；如果目标机器缺词典，会按业务错误提示，不能把“缺词典的 400”当作功能通过。
 
 ## 5. 联系页规则
 
@@ -104,16 +134,18 @@ docker compose ps     # 预期 app + embedding
 ### 脚本行为
 
 - 默认**拒绝在线归档**：必须提供 `STOP_CMD`/`START_CMD`；停止写入后等待 `STOP_WAIT_SECONDS`（默认 3 秒）再 tar。
-- PowerShell 显式检查 `tar` 退出码；`trap`/`finally` 负责尝试恢复服务。
-- 生成 `.manifest.txt` 和 `.sha256`。
-- 恢复前校验 `.sha256`；目标非空拒绝；不删除原备份。
+- PowerShell 显式检查 `tar`/启动命令的原生退出码；Bash 在 EXIT trap 中检查启动命令。**恢复失败不再算成功**：归档保留，脚本以退出码 6 结束，并同时打印归档错误/恢复错误。
+- 生成 `.manifest.txt` 和 `.sha256`；sidecar 只写摘要和归档 basename，搬目录/搬机器后可校验。
+- 恢复前直接校验**本次传入的归档**；缺校验文件、格式错误、摘要不符都拒绝；目标非空拒绝；不删除原备份。
 
 ### 实测
 
 - 成功备份小样本 → 恢复 4 个文件。
-- 篡改归档后恢复 → checksum mismatch，拒绝。
+- 备份成功、启动命令返回 7 → 脚本 **exit 6**，归档保留，打印 `ERROR: service restore failed`。
+- 停止命令返回 5 → **exit 3**，不执行恢复。
+- 缺目录/归档失败 + 启动失败 → **exit 4**，同时打印“归档失败”和“恢复失败”。
+- Bash 跨目录：归档+sidecar 复制到新目录、原归档改名后仍能恢复；只篡改新目录中的归档（原归档不变）→ checksum 拒绝，原归档 hash 不变。
 - 非空目标恢复 → 拒绝。
-- 缺目录导致 tar 失败 → 非零退出，且仍执行了恢复服务命令。
 - 真实数据：停掉 app 后备份，恢复出 36 个文件；用另一个实例（8096）指向恢复目录启动，登录后读到 3 个会话、1 条记忆、12925 条知识；验证后停止 8096。没有覆盖真实数据。
 
 ## 8. Linux 首次部署

@@ -17,8 +17,13 @@ $items = @("data", "knowledge", "sessions")
 if ($IncludeDict) { $items += "dict" }
 
 $stopped = $false
+$archiveError = $null
+$recoveryError = $null
+$status = 0
+
 try {
     Write-Host "Stop writes: $StopCommand"
+    $global:LASTEXITCODE = 0
     Invoke-Expression $StopCommand
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "stop command failed: $LASTEXITCODE" }
     $stopped = $true
@@ -27,22 +32,56 @@ try {
     Write-Host "Archive: $Root -> $archive"
     Push-Location $Root
     try {
+        $global:LASTEXITCODE = 0
         & tar -czf $archive @items
         if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "tar failed: $LASTEXITCODE" }
     } finally {
         Pop-Location
     }
 
+    $global:LASTEXITCODE = 0
     & tar -tzf $archive | Set-Content "$archive.manifest.txt" -Encoding UTF8
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "manifest failed: $LASTEXITCODE" }
 
     $hash = Get-FileHash $archive -Algorithm SHA256
-    "$($hash.Hash)  $archive" | Set-Content "$archive.sha256" -Encoding ASCII
+    "$($hash.Hash)  $(Split-Path -Leaf $archive)" | Set-Content "$archive.sha256" -Encoding ASCII
     Write-Host "Archive: $archive"
     Get-Item $archive | Select-Object FullName, Length
+} catch {
+    $message = $_.Exception.Message
+    if ($stopped) {
+        $archiveError = "archive failed - $message"
+        $status = 5
+    } else {
+        $archiveError = "stop failed - $message"
+        $status = 3
+    }
 } finally {
     if ($stopped) {
         Write-Host "Start service: $StartCommand"
-        try { Invoke-Expression $StartCommand } catch { Write-Warning "start command failed: $($_.Exception.Message)" }
+        try {
+            $global:LASTEXITCODE = 0
+            Invoke-Expression $StartCommand
+            if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+                throw "start command failed: $LASTEXITCODE"
+            }
+            Write-Host "Service restore: OK"
+        } catch {
+            $recoveryError = $_.Exception.Message
+            if ($status -eq 0) { $status = 6 }
+        }
     }
+}
+
+# 两类错误都输出,不让恢复错误覆盖归档错误
+if ($null -ne $archiveError) {
+    [Console]::Error.WriteLine("ERROR: $archiveError")
+}
+if ($null -ne $recoveryError) {
+    [Console]::Error.WriteLine("ERROR: service restore failed - $recoveryError")
+    [Console]::Error.WriteLine("MANUAL: check service status; restore command: $StartCommand")
+}
+if ($status -ne 0) {
+    [Console]::Error.WriteLine("BACKUP NOT FULLY SUCCESSFUL. Archive (if created) is kept: $archive")
+    exit $status
 }

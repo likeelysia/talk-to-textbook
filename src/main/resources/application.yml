@@ -93,6 +93,9 @@ fa:
   llm:
     request-timeout-seconds: 120
     connect-timeout-seconds: 30
+    # 流式响应体:总时限从发请求算起;空闲时限只看 data: 事件,心跳注释不算
+    stream-idle-timeout-seconds: ${FA_STREAM_IDLE_TIMEOUT_SECONDS:60}
+    stream-total-timeout-seconds: ${FA_STREAM_TOTAL_TIMEOUT_SECONDS:300}
     max-attempts: 5
     retry-base-ms: 2000
     retry-max-ms: 20000

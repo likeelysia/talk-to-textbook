@@ -68,7 +68,8 @@ public class AgentStreamController {
         emitter.onCompletion(() -> cancelled.set(true));
         emitter.onTimeout(() -> cancelled.set(true));
         emitter.onError(error -> cancelled.set(true));
-        streams.start(emitter, out -> pipe(out, conversationId, req.question(), cancelled));
+        streams.start(emitter, out -> pipe(out, conversationId, req.question(), cancelled),
+                () -> cancelled.set(true));
         return emitter;
     }
 

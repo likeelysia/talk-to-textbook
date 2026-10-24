@@ -25,15 +25,42 @@ fi
 
 mkdir -p "$OUT"
 STOPPED=0
-restore_service() {
+ARCHIVE_ERROR=""
+RECOVERY_ERROR=""
+
+finish() {
+  local status=$?
+  set +e
+  trap - EXIT
+
   if [[ "$STOPPED" == "1" ]]; then
     echo "恢复服务: $START_CMD"
     if ! eval "$START_CMD"; then
-      echo "警告:服务恢复命令失败,请手动检查!" >&2
+      RECOVERY_ERROR="服务恢复命令失败"
+      echo "错误:服务恢复失败,请立即手动检查服务状态!" >&2
+    else
+      echo "服务已恢复。"
     fi
   fi
+
+  # 两类错误都打印,不能用 finally 的恢复错误盖掉原来的归档错误
+  if [[ -n "$ARCHIVE_ERROR" ]]; then
+    echo "错误:归档失败 — $ARCHIVE_ERROR" >&2
+  fi
+  if [[ -n "$RECOVERY_ERROR" ]]; then
+    echo "错误:恢复失败 — $RECOVERY_ERROR" >&2
+  fi
+
+  if [[ "$status" -eq 0 && -n "$RECOVERY_ERROR" ]]; then
+    status=6
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    echo "备份未完整成功。归档若已生成会保留: $ARCHIVE" >&2
+    echo "人工检查:确认应用/容器是否在运行;恢复服务命令: $START_CMD" >&2
+  fi
+  exit "$status"
 }
-trap restore_service EXIT
+trap finish EXIT
 
 echo "停止写入: $STOP_CMD"
 if ! eval "$STOP_CMD"; then
@@ -49,20 +76,26 @@ if [[ "${INCLUDE_DICT:-0}" == "1" ]]; then
 fi
 for item in "${ITEMS[@]}"; do
   if [[ ! -e "$ROOT/$item" ]]; then
-    echo "缺少目录: $ROOT/$item" >&2
+    ARCHIVE_ERROR="缺少目录 $ROOT/$item"
+    echo "$ARCHIVE_ERROR" >&2
     exit 4
   fi
 done
 
 echo "归档: $ROOT -> $ARCHIVE"
 if ! tar -czf "$ARCHIVE" -C "$ROOT" "${ITEMS[@]}"; then
-  echo "tar 归档失败,未生成有效备份。" >&2
+  ARCHIVE_ERROR="tar 归档失败,未生成有效备份"
+  echo "$ARCHIVE_ERROR" >&2
   exit 5
 fi
 
 tar -tzf "$ARCHIVE" > "$ARCHIVE.manifest.txt"
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$ARCHIVE" | tee "$ARCHIVE.sha256"
+  # 只写 basename,sidecar 和归档一起搬目录/搬机器仍能校验
+  (cd "$OUT" && sha256sum "$(basename "$ARCHIVE")") > "$ARCHIVE.sha256"
+  cat "$ARCHIVE.sha256"
+else
+  echo "警告:没有 sha256sum,未生成校验文件;restore.sh 将拒绝恢复。" >&2
 fi
 echo "完成: $ARCHIVE"
 du -h "$ARCHIVE"
