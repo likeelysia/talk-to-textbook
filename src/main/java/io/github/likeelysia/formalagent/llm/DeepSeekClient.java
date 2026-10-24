@@ -222,9 +222,9 @@ public class DeepSeekClient implements LlmClient {
     /**
      * 发流式请求并逐行消费 SSE。
      *
-     * <p>为什么用 {@code BodyHandlers.ofLines()}:它把响应体变成一行行的 Stream,
-     * 我们只要认 {@code data:} 开头的行 —— 解析是<b>惰性</b>的,模型吐一行我们就收一行,
-     * 这才是"流式"的意义(换成 {@code ofString()} 会等到全部生成完,白搭)。
+     * <p>响应体用 {@code BodyHandlers.ofInputStream()} 拿字节流,再用 UTF-8 的
+     * {@link BufferedReader} 按行读 —— 这样成功流可以逐行解析,错误流则能在同一个
+     * 看门狗下按字节截断,不必等换行或 EOF。
      */
     private AssistantTurn postStream(ChatRequest request, Consumer<String> onDelta,
                                      BooleanSupplier cancelled) {

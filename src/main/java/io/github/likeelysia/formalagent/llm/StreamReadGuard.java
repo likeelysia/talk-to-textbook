@@ -53,7 +53,7 @@ final class StreamReadGuard implements AutoCloseable {
         touch();
     }
 
-    /** 错误响应体每读到一行调用一次。 */
+    /** 错误响应体每读到一段字节调用一次。 */
     void touch() {
         lastDataAt.set(System.currentTimeMillis());
     }
