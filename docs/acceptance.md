@@ -50,7 +50,7 @@ TOTAL=439 FAIL=0 ERR=0 SKIP=1
 - **真实文字/图片模型：未执行**。本机没有 `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` / `FA_VISION_API_KEY`；`/api/vocab/explain` 在缺 Key 时返回明确 400，`/api/health` 的 vision 为 DOWN。不能把本地假模型或词典提取当作真实模型质量验收。
 - **Docker/Compose：未执行**。本机没有 `docker` 命令，只有部署文件；没有 `docker compose build/up` 证据。
 - **云端/HTTPS/手机：未执行**。没有服务器、域名、证书和可公网访问的部署地址；没有手机实机。
-- **资源**：本机 31.8 GB 内存；验收时 Java 进程工作集约 196 MB，llama-server 约 340 MB；这不是容器内存/云主机实测。
+- **资源**：本机 31.8 GB 内存；隔离空知识库实例约 196 MB，加载真实 12925 条知识/向量后实测 Java 进程约 **1.5 GB**，llama-server 约 340 MB；这不是容器内存/云主机实测，部署时要按真实知识库规模留余量。
 
 ### 0.5 八项验收表
 
