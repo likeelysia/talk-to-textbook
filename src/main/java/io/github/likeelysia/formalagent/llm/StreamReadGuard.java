@@ -7,22 +7,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Stream;
 
 /**
  * 给响应体加“总时限 + 空闲时限”。
  *
  * <p>HttpRequest.timeout 只管到拿到响应头;响应体是惰性读取的,模型吐完第一个 token
- * 后停住时,原实现会一直占着模型名额。这里用看门狗在超时后真正关闭响应流,
+ * 后停住时,原实现会一直占着模型名额。这里用看门狗在超时后真正关闭响应体,
  * 让阻塞的读循环退出;名额由外层 try-with-resources 在读循环结束后释放,
  * 不会出现“名额先还了、后台还在读”的假并发。
  *
- * <p>成功 SSE 的空闲只看 data: 事件,不看 ": ping" 心跳;错误响应体不是 SSE,
- * 空启用“收到任意一行错误正文”作为活动。
+ * <p>成功 SSE 的空闲只看 data: 事件,不看 ": ping" 心跳;错误响应体按“任意一段
+ * 错误正文”作为活动。关闭对象只要求是 AutoCloseable,成功流和错误流都用同一个看门狗。
  */
 final class StreamReadGuard implements AutoCloseable {
 
-    private final Stream<String> lines;
+    private final AutoCloseable body;
     private final long idleMillis;
     private final long totalMillis;
     private final long totalDeadline;
@@ -32,14 +31,14 @@ final class StreamReadGuard implements AutoCloseable {
     private final AtomicReference<String> reason = new AtomicReference<>("");
     private final AtomicLong lastDataAt = new AtomicLong();
 
-    StreamReadGuard(Stream<String> lines, long startedAt, long idleMillis, long totalMillis,
+    StreamReadGuard(AutoCloseable body, long startedAt, long idleMillis, long totalMillis,
                     ScheduledExecutorService scheduler) {
-        this(lines, startedAt, idleMillis, totalMillis, scheduler, "data 事件");
+        this(body, startedAt, idleMillis, totalMillis, scheduler, "data 事件");
     }
 
-    StreamReadGuard(Stream<String> lines, long startedAt, long idleMillis, long totalMillis,
+    StreamReadGuard(AutoCloseable body, long startedAt, long idleMillis, long totalMillis,
                     ScheduledExecutorService scheduler, String idleLabel) {
-        this.lines = lines;
+        this.body = body;
         this.idleMillis = Math.max(100, idleMillis);
         this.totalMillis = Math.max(100, totalMillis);
         this.totalDeadline = startedAt + this.totalMillis;
@@ -81,21 +80,21 @@ final class StreamReadGuard implements AutoCloseable {
     private void timeout(String message) {
         if (!timedOut.compareAndSet(false, true)) return;
         reason.set(message);
-        closeLines();
+        closeBody();
     }
 
-    private void closeLines() {
+    private void closeBody() {
         try {
-            lines.close();
-        } catch (RuntimeException ignored) {
-            // 看门狗关闭流是尽力而为;真正的退出由读循环的异常/结束驱动
+            body.close();
+        } catch (Exception ignored) {
+            // 看门狗关闭响应体是尽力而为;真正的退出由读循环的异常/结束驱动
         }
     }
 
     @Override
     public void close() {
         task.cancel(false);
-        closeLines();
+        closeBody();
     }
 
     static ScheduledExecutorService daemonScheduler() {

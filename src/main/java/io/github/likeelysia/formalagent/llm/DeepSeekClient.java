@@ -15,20 +15,22 @@ import io.github.likeelysia.formalagent.llm.dto.ToolCall;
 import io.github.likeelysia.formalagent.llm.dto.ToolDefinition;
 import io.github.likeelysia.formalagent.log.ApiLogger;
 import jakarta.annotation.PreDestroy;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.retry.annotation.Backoff;
@@ -46,9 +48,9 @@ public class DeepSeekClient implements LlmClient {
     /** 服务端结束标记。 */
     private static final String DONE = "[DONE]";
 
-    /** 错误体只读一小段,防止服务端返回整页 HTML 或无限流。 */
-    private static final int ERROR_BODY_MAX_LINES = 20;
-    private static final int ERROR_BODY_MAX_CHARS = 4096;
+    /** 错误体只读 4096 字节,固定缓冲;不等待换行/EOF,也不随单行增长。 */
+    private static final int ERROR_BODY_MAX_BYTES = 4096;
+    private static final int ERROR_BODY_READ_BUFFER = 1024;
 
     private final HttpClient client;                     // 重对象:构造时建一份,复用
     private final ObjectMapper mapper;                   // ← 容器注入的统一 JSON 序列化器
@@ -254,9 +256,9 @@ public class DeepSeekClient implements LlmClient {
                 .build();
 
         long start = System.currentTimeMillis();
-        HttpResponse<Stream<String>> response;
+        HttpResponse<InputStream> response;
         try {
-            response = client.send(httpRequest, HttpResponse.BodyHandlers.ofLines());
+            response = client.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
         } catch (IOException e) {
             // 还没读到任何一行 → 安全重试
             throw new TransientApiException("网络异常(尚未开始输出,可重试):" + e.getMessage(), e);
@@ -268,7 +270,7 @@ public class DeepSeekClient implements LlmClient {
         int code = response.statusCode();
         if (code < 200 || code >= 300) {
             String errorBody;
-            // 错误响应体也必须受总时限/空闲时限保护:非 2xx 也可能是“一行 JSON 后一直不结束”。
+            // 错误响应体也必须受总时限/空闲时限保护,并且按字节截断,不等待换行/EOF。
             try (StreamReadGuard guard = new StreamReadGuard(
                     response.body(), start, streamIdleTimeoutMillis, streamTotalTimeoutMillis,
                     streamGuardScheduler, "错误响应数据")) {
@@ -295,23 +297,24 @@ public class DeepSeekClient implements LlmClient {
     }
 
     /** 逐行消费 SSE:累积正文 + 拼接工具调用碎片。 */
-    private AssistantTurn consume(Stream<String> lines, Consumer<String> onDelta, long start,
+    private AssistantTurn consume(InputStream body, Consumer<String> onDelta, long start,
                                   int requestLength, StreamReadGuard guard,
                                   BooleanSupplier cancelled) {
         StringBuilder content = new StringBuilder();
         Map<Integer, PartialCall> partials = new LinkedHashMap<>();
         boolean emitted = false;
 
-        try {
-            Iterator<String> it = lines.iterator();
-            while (it.hasNext()) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(body, StandardCharsets.UTF_8))) {
+            String raw;
+            while ((raw = reader.readLine()) != null) {
                 if (guard.isTimedOut()) {
                     throw new AgentException(guard.reason());
                 }
                 if (cancelled != null && cancelled.getAsBoolean()) {
                     throw new AgentException("用户已取消本次回答");
                 }
-                String line = it.next().strip();
+                String line = raw.strip();
                 // 只认 data: 行 —— ": ping" 这类心跳注释、event:/id: 行一律跳过
                 if (line.isEmpty() || !line.startsWith(DATA_PREFIX)) {
                     continue;
@@ -349,8 +352,6 @@ public class DeepSeekClient implements LlmClient {
                 throw new AgentException(guard.reason(), e);
             }
             throw streamFailure(emitted, "流式读取失败:" + e.getMessage(), e);
-        } finally {
-            lines.close();
         }
 
         ApiLogger.record(config.deepseek().model(), 200, System.currentTimeMillis() - start,
@@ -413,38 +414,38 @@ public class DeepSeekClient implements LlmClient {
         return ApiKeys.resolve(config.deepseek().apiKey(), config.deepseek().apiKeyEnv());
     }
 
-    /** 错误体不能无限读:最多 20 行/4096 字符;读的每一行都刷新空闲计时。 */
-    private static String readErrorBody(Stream<String> lines, StreamReadGuard guard) {
-        StringBuilder out = new StringBuilder();
-        int lineCount = 0;
+    /**
+     * 错误体按字节读取:最多 4096 字节,固定 1024 字节缓冲。
+     *
+     * <p>不依赖完整一行、完整正文或 EOF;达到上限立刻返回,由外层关闭响应体。
+     * UTF-8 解码使用替换字符,截断落在多字节字符中间也不会再抛异常。
+     */
+    private static String readErrorBody(InputStream body, StreamReadGuard guard) {
+        byte[] out = new byte[ERROR_BODY_MAX_BYTES];
+        byte[] buffer = new byte[ERROR_BODY_READ_BUFFER];
+        int total = 0;
         try {
-            Iterator<String> it = lines.iterator();
-            while (lineCount < ERROR_BODY_MAX_LINES && out.length() < ERROR_BODY_MAX_CHARS) {
+            while (total < ERROR_BODY_MAX_BYTES) {
                 if (guard.isTimedOut()) break;
-                if (!it.hasNext()) break;
-                String line = it.next();
+                int want = Math.min(buffer.length, ERROR_BODY_MAX_BYTES - total);
+                int n = body.read(buffer, 0, want);
+                if (n < 0) break;
+                if (n == 0) continue;
+                System.arraycopy(buffer, 0, out, total, n);
+                total += n;
                 guard.touch();
-                lineCount++;
-                if (out.length() > 0) out.append(' ');
-                int room = ERROR_BODY_MAX_CHARS - out.length();
-                if (line.length() > room) {
-                    out.append(line, 0, room);
-                    break;
-                }
-                out.append(line);
             }
-        } catch (RuntimeException e) {
+        } catch (IOException e) {
             if (guard.isTimedOut()) {
                 throw new ErrorBodyTimeoutException(guard.reason(), e);
             }
-            throw e;
-        } finally {
-            lines.close();
+            throw new ErrorBodyTimeoutException("读取错误响应失败: " + e.getMessage(), e);
         }
         if (guard.isTimedOut()) {
             throw new ErrorBodyTimeoutException(guard.reason(), null);
         }
-        return out.toString();
+        // new String 对截断的 UTF-8 序列会用替换字符,不会抛出编码异常
+        return new String(out, 0, total, StandardCharsets.UTF_8);
     }
 
     /** 非 2xx 响应体超时;由调用方按状态码决定可重试还是直接失败。 */

@@ -2,6 +2,7 @@ package io.github.likeelysia.formalagent.llm;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -77,6 +78,65 @@ class DeepSeekStreamTimeoutTest {
 
     private static String data(String json) {
         return "data: " + json + "\n\n";
+    }
+
+    @Test
+    void oversizedErrorBodyStopsAtByteLimitWithoutWaitingForTimeout() throws Exception {
+        for (int code : List.of(400, 429, 503)) {
+            release = new CountDownLatch(1);
+            String url = start(exchange -> {
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(code, 0);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(new byte[8192]);       // 超过 4096,且没有换行
+                    out.flush();
+                    release.await(8, TimeUnit.SECONDS);
+                }
+            });
+            ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+            DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 3, 5);
+            long started = System.currentTimeMillis();
+            Throwable failure = catchThrowable(
+                    () -> client.chatWithToolsStream(messages(), List.of(), s -> {}));
+            assertThat(failure).isInstanceOf(AgentException.class).hasMessageContaining("DeepSeek");
+            if (code == 400) {
+                assertThat(failure).isNotInstanceOf(TransientApiException.class);
+            } else {
+                assertThat(failure).isInstanceOf(TransientApiException.class);
+            }
+            assertThat(System.currentTimeMillis() - started).isLessThan(1500);
+            assertThat(limiter.availableTotal()).isEqualTo(1);
+            release.countDown();
+            server.stop(0);
+            server = null;
+        }
+    }
+
+    @Test
+    void truncatedMultibyteErrorBodyDoesNotThrowEncodingFailure() throws Exception {
+        release = new CountDownLatch(1);
+        byte[] prefix = new byte[4095];
+        java.util.Arrays.fill(prefix, (byte) 'a');
+        String url = start(exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(prefix);
+                out.write("中".getBytes(StandardCharsets.UTF_8));   // 第 4096 字节正好切在多字节字符中间
+                out.write("尾".getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                release.await(8, TimeUnit.SECONDS);
+            }
+        });
+        ModelConcurrencyLimiter limiter = new ModelConcurrencyLimiter(1, 1, 1);
+        DeepSeekClient client = new DeepSeekClient(config(url), new ObjectMapper(), limiter, 3, 5);
+        long started = System.currentTimeMillis();
+        assertThatThrownBy(() -> client.chatWithToolsStream(messages(), List.of(), s -> {}))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("DeepSeek 返回错误");
+        assertThat(System.currentTimeMillis() - started).isLessThan(1500);
+        assertThat(limiter.availableTotal()).isEqualTo(1);
+        release.countDown();
     }
 
     @Test
