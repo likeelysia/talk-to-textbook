@@ -89,8 +89,8 @@ public class KnowledgeController {
      */
     @PostMapping("/knowledge/vectors/backfill")
     public KnowledgeStore.VectorBackfillResult backfillVectors(
-            @RequestParam(defaultValue = "50") int limit) {
-        return store.backfillVectors(Math.max(1, Math.min(limit, 1000)));
+            @RequestParam(defaultValue = "1000") int limit) {
+        return store.backfillVectors(Math.max(1, Math.min(limit, 2000)));
     }
 
     /** 按来源删除;name 可只写文件名的一部分,但只有唯一命中才动手(见 {@link SourceResolver})。 */
@@ -102,7 +102,7 @@ public class KnowledgeController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("source", source);
         body.put("removed", removed);
-        body.put("count", store.all().size());
+        body.put("count", store.count());
         return body;
     }
 }

@@ -9,16 +9,20 @@ import io.github.likeelysia.formalagent.llm.EmbeddingClient;
 import io.github.likeelysia.formalagent.llm.Vectors;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -62,6 +66,10 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     private final double minScore;
     private final Map<String, KnowledgeItem> items = new LinkedHashMap<>();   // id → item(保序 + 去重)
     private final Map<String, float[]> vectors = new LinkedHashMap<>();       // id → 向量
+    /** 只保护内存 Map 的短临界区;查询只在这里做扫描,不再被外部 embedding 持有。 */
+    private final Object stateLock = new Object();
+    /** 串行化所有写盘/提交动作,避免补齐与导入互相覆盖 sidecar;查询不拿它。 */
+    private final ReentrantLock writeLock = new ReentrantLock();
 
     public JsonKnowledgeStore(ObjectMapper mapper, EmbeddingClient embedder,
                               @Value("${fa.knowledge.file:knowledge/base.json}") String filePath,
@@ -146,59 +154,85 @@ public class JsonKnowledgeStore implements KnowledgeStore {
 
     @Override
     public void addAll(List<KnowledgeItem> newItems) {
-        for (KnowledgeItem item : newItems) items.put(item.id(), item);   // 同 id 覆盖
-        persist();
+        writeLock.lock();
+        try {
+            synchronized (stateLock) {
+                for (KnowledgeItem item : newItems) items.put(item.id(), item);   // 同 id 覆盖
+            }
+            persist();
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     @Override
     public List<KnowledgeItem> all() {
-        return List.copyOf(items.values());
+        synchronized (stateLock) {
+            return List.copyOf(items.values());
+        }
     }
 
     @Override
     public int count() {
-        return items.size();
+        synchronized (stateLock) {
+            return items.size();
+        }
     }
 
     @Override
     public List<KnowledgeItem> page(int offset, int limit) {
         if (offset < 0 || limit <= 0) return List.of();
-        return items.values().stream().skip(offset).limit(limit).toList();
+        synchronized (stateLock) {
+            return items.values().stream().skip(offset).limit(limit).toList();
+        }
     }
 
     @Override
     public KnowledgeItem get(String id) {
-        return id == null ? null : items.get(id);
+        synchronized (stateLock) {
+            return id == null ? null : items.get(id);
+        }
     }
 
     // ---------------------------------------------------------------- 删除 / 替换(按来源)
 
     @Override
     public List<String> sources() {
-        return items.values().stream().map(KnowledgeItem::source).distinct().toList();
+        synchronized (stateLock) {
+            return items.values().stream().map(KnowledgeItem::source).distinct().toList();
+        }
     }
 
     @Override
     public Map<String, Integer> countsBySource() {
-        Map<String, Integer> counts = new LinkedHashMap<>();           // 保序,列表看着顺
-        items.values().forEach(k -> counts.merge(k.source(), 1, Integer::sum));
-        return counts;
+        synchronized (stateLock) {
+            Map<String, Integer> counts = new LinkedHashMap<>();           // 保序,列表看着顺
+            items.values().forEach(k -> counts.merge(k.source(), 1, Integer::sum));
+            return counts;
+        }
     }
 
     @Override
     public int removeBySource(String source) {
         if (source == null || source.isBlank()) return 0;              // 防呆:空参数绝不等于"清库"
-        int removed = (int) items.values().stream()
-                .filter(k -> source.equals(k.source()))
-                .count();
-        if (removed == 0) return 0;
-
-        items.values().removeIf(k -> source.equals(k.source()));
-        purgeOrphanVectors();
-        persist();
-        persistVectors();                                             // 顺手把向量 sidecar 瘦身
-        log.info("按来源删除 {} 条:{}", removed, source);
-        return removed;
+        writeLock.lock();
+        try {
+            int removed;
+            synchronized (stateLock) {
+                removed = (int) items.values().stream()
+                        .filter(k -> source.equals(k.source()))
+                        .count();
+                if (removed == 0) return 0;
+                items.values().removeIf(k -> source.equals(k.source()));
+                purgeOrphanVectors();
+            }
+            persist();
+            persistVectors();                                         // 顺手把向量 sidecar 瘦身
+            log.info("按来源删除 {} 条:{}", removed, source);
+            return removed;
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     @Override
@@ -206,15 +240,24 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         if (source == null || source.isBlank()) {
             throw new AgentException("来源为空,拒绝替换");
         }
-        int removed = (int) items.values().stream()
-                .filter(k -> source.equals(k.source()))
-                .count();
-        items.values().removeIf(k -> source.equals(k.source()));       // ① 这本旧的全不要
-        for (KnowledgeItem item : newItems) items.put(item.id(), item); // ② 整份换成新的
-        purgeOrphanVectors();
-        persist();
-        log.info("重灌来源 {}:清掉旧条目 {} 条,新收录 {} 条", source, removed, newItems.size());
-        return newItems.size();
+        writeLock.lock();
+        try {
+            int removed;
+            synchronized (stateLock) {
+                removed = (int) items.values().stream()
+                        .filter(k -> source.equals(k.source()))
+                        .count();
+                items.values().removeIf(k -> source.equals(k.source()));       // ① 这本旧的全不要
+                for (KnowledgeItem item : newItems) items.put(item.id(), item); // ② 整份换成新的
+                purgeOrphanVectors();
+            }
+            persist();
+            persistVectors();
+            log.info("重灌来源 {}:清掉旧条目 {} 条,新收录 {} 条", source, removed, newItems.size());
+            return newItems.size();
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /** 清掉向量表里已经不存在对应条目的记录(删条目时顺手调用),免得 sidecar 越滚越大。 */
@@ -225,51 +268,64 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     // ---------------------------------------------------------------- 检索(hybrid + 阈值)
 
     @Override
-    public synchronized List<KnowledgeItem> search(String query, int topK) {
-        if (query == null || query.isBlank() || items.isEmpty() || topK <= 0) return List.of();
+    public List<KnowledgeItem> search(String query, int topK) {
+        if (query == null || query.isBlank() || topK <= 0) return List.of();
+        synchronized (stateLock) {
+            if (items.isEmpty()) return List.of();
+        }
 
         List<String> terms = tokenize(query);
+        // embedding 调用在锁外;慢模型不会堵住其他查询/写提交。
         float[] queryVector = tryEmbed(query);
         boolean hasVector = queryVector != null;
         if (!hasVector && terms.isEmpty()) return List.of();
 
-        int k = Math.min(topK, items.size());
-        // 有界小顶堆:只保留当前最好的 k 条,O(N log K),不再把全库命中装进 List 再全排序。
-        PriorityQueue<Scored> heap = new PriorityQueue<>(
-                Comparator.comparingDouble(Scored::score)
-                        .thenComparing(Scored::seq, Comparator.reverseOrder()));
-        int seq = 0;
-        for (KnowledgeItem item : items.values()) {
-            float[] v = vectors.get(item.id());
-            double vectorScore = (hasVector && v != null) ? Vectors.cosine(queryVector, v) : 0;
-            double keywordScore = keywordScore(item, terms);
+        synchronized (stateLock) {
+            if (items.isEmpty()) return List.of();
+            int k = Math.min(topK, items.size());
+            // 有界小顶堆:只保留当前最好的 k 条,O(N log K),不再把全库命中装进 List 再全排序。
+            PriorityQueue<Scored> heap = new PriorityQueue<>(
+                    Comparator.comparingDouble(Scored::score)
+                            .thenComparing(Scored::seq, Comparator.reverseOrder()));
+            int seq = 0;
+            for (KnowledgeItem item : items.values()) {
+                float[] v = vectors.get(item.id());
+                double vectorScore = (hasVector && v != null) ? Vectors.cosine(queryVector, v) : 0;
+                double keywordScore = keywordScore(item, terms);
 
-            double score = hasVector
-                    ? VECTOR_WEIGHT * vectorScore + (1 - VECTOR_WEIGHT) * keywordScore
-                    : keywordScore;
-            if (score <= 0 || score < minScore) continue;       // 阈值:不够相关就当没找到
-            Scored candidate = new Scored(item, score, seq++);
-            if (heap.size() < k) {
-                heap.add(candidate);
-            } else if (score > heap.peek().score()) {
-                heap.poll();
-                heap.add(candidate);
+                double score = hasVector
+                        ? VECTOR_WEIGHT * vectorScore + (1 - VECTOR_WEIGHT) * keywordScore
+                        : keywordScore;
+                if (score <= 0 || score < minScore) continue;       // 阈值:不够相关就当没找到
+                Scored candidate = new Scored(item, score, seq++);
+                if (heap.size() < k) {
+                    heap.add(candidate);
+                } else if (score > heap.peek().score()) {
+                    heap.poll();
+                    heap.add(candidate);
+                }
             }
-        }
 
-        List<Scored> top = new ArrayList<>(heap);
-        top.sort(Comparator.comparingDouble(Scored::score).reversed()
-                .thenComparingInt(Scored::seq));
-        if (log.isDebugEnabled()) {
-            top.forEach(s -> log.debug("检索命中 {}(score={}, 向量={})",
-                    s.item().name(), String.format(Locale.ROOT, "%.3f", s.score()),
-                    hasVector ? "开" : "关"));
+            List<Scored> top = new ArrayList<>(heap);
+            top.sort(Comparator.comparingDouble(Scored::score).reversed()
+                    .thenComparingInt(Scored::seq));
+            if (log.isDebugEnabled()) {
+                top.forEach(s -> log.debug("检索命中 {}(score={}, 向量={})",
+                        s.item().name(), String.format(Locale.ROOT, "%.3f", s.score()),
+                        hasVector ? "开" : "关"));
+            }
+            return top.stream().map(Scored::item).toList();
         }
-        return top.stream().map(Scored::item).toList();
     }
 
     @Override
     public int missingVectorCount() {
+        synchronized (stateLock) {
+            return missingVectorCountLocked();
+        }
+    }
+
+    private int missingVectorCountLocked() {
         int missing = 0;
         for (KnowledgeItem item : items.values()) {
             if (vectors.get(item.id()) == null) missing++;
@@ -279,40 +335,70 @@ public class JsonKnowledgeStore implements KnowledgeStore {
 
     /**
      * 显式、分批、可恢复地补向量:每批算完立即写 sidecar,进程中断后再次调用会从剩余条目继续。
-     * 查询路径不再调用它;embedding 服务没开时直接报错,由管理端决定何时重试。
+     * embedding 在锁外执行;sidecar 写入用临时文件+原子替换,写入成功后才提交内存。
+     * 查询路径不再调用它。
      */
     @Override
-    public synchronized VectorBackfillResult backfillVectors(int limit) {
-        int total = items.size();
-        List<KnowledgeItem> missing = items.values().stream()
-                .filter(k -> vectors.get(k.id()) == null)
-                .toList();
-        if (missing.isEmpty()) return new VectorBackfillResult(0, 0, total, true);
+    public VectorBackfillResult backfillVectors(int limit) {
+        List<KnowledgeItem> batch;
+        int total;
+        synchronized (stateLock) {
+            total = items.size();
+            batch = items.values().stream()
+                    .filter(k -> vectors.get(k.id()) == null)
+                    .limit(Math.max(1, Math.min(limit, Math.max(1, items.size()))))
+                    .toList();
+        }
+        if (batch.isEmpty()) return new VectorBackfillResult(0, 0, total, true);
 
-        int batchSize = Math.max(1, Math.min(limit, missing.size()));
-        List<KnowledgeItem> batch = missing.subList(0, batchSize);
         List<String> texts = batch.stream()
                 .map(k -> k.name() + " " + (k.detail() == null ? "" : k.detail()))
                 .toList();
 
         List<float[]> computed;
         try {
-            computed = embedder.embedAll(texts);
+            computed = embedder.embedAll(texts);       // 慢网络在锁外
         } catch (RuntimeException e) {
             throw new AgentException("向量补齐失败(embedding 不可用):" + e.getMessage(), e);
         }
         if (computed == null || computed.size() != batch.size()) {
             throw new AgentException("向量补齐失败:模型返回数量与请求不一致");
         }
-        for (int i = 0; i < batch.size(); i++) {
-            vectors.put(batch.get(i).id(), computed.get(i));
-        }
-        if (!persistVectors()) {
-            throw new AgentException("向量补齐已计算,但 sidecar 落盘失败;下次会重试");
-        }
 
-        int remaining = missing.size() - batchSize;
-        return new VectorBackfillResult(batchSize, remaining, total, remaining == 0);
+        writeLock.lock();
+        try {
+            Map<String, float[]> merged;
+            Map<String, float[]> accepted = new LinkedHashMap<>();
+            synchronized (stateLock) {
+                for (int i = 0; i < batch.size(); i++) {
+                    KnowledgeItem item = batch.get(i);
+                    KnowledgeItem current = items.get(item.id());
+                    // 计算期间被删除/替换的条目,不能把过期向量提交进去。
+                    if (current != null && Objects.equals(current, item)
+                            && vectors.get(item.id()) == null) {
+                        accepted.put(item.id(), computed.get(i));
+                    }
+                }
+                if (accepted.isEmpty()) {
+                    int missing = missingVectorCountLocked();
+                    return new VectorBackfillResult(0, missing, items.size(), missing == 0);
+                }
+                merged = new LinkedHashMap<>(vectors);
+                merged.putAll(accepted);
+            }
+
+            // 写入成功前不改内存;失败时旧 sidecar 保持完整,重试会重新计算。
+            if (!writeVectors(merged)) {
+                throw new AgentException("向量补齐已计算,但 sidecar 落盘失败;下次会重试");
+            }
+            synchronized (stateLock) {
+                vectors.putAll(accepted);
+                int remaining = missingVectorCountLocked();
+                return new VectorBackfillResult(accepted.size(), remaining, items.size(), remaining == 0);
+            }
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     private float[] tryEmbed(String text) {
@@ -358,19 +444,40 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         }
     }
 
-    /** 向量落盘失败不该影响普通写入;显式补向量流程会检查返回值并报错。 */
+    /** 向量落盘:写临时文件,成功后再原子替换;失败时保留旧 sidecar。 */
     private boolean persistVectors() {
+        return writeVectors(vectors);
+    }
+
+    private boolean writeVectors(Map<String, float[]> snapshot) {
+        Path tmp = null;
         try {
             Path parent = vectorFile.toAbsolutePath().getParent();
             if (parent != null) Files.createDirectories(parent);
-            int dim = vectors.values().stream().findFirst().map(v -> v.length).orElse(0);
-            try (OutputStream out = Files.newOutputStream(vectorFile)) {
-                mapper.writeValue(out, new VectorFile(embedder.modelName(), dim, vectors));
+            int dim = snapshot.values().stream().findFirst().map(v -> v.length).orElse(0);
+            tmp = Files.createTempFile(parent, "." + vectorFile.getFileName() + "-", ".tmp");
+            try (OutputStream out = Files.newOutputStream(tmp)) {
+                mapper.writeValue(out, new VectorFile(embedder.modelName(), dim, snapshot));
             }
+            try {
+                Files.move(tmp, vectorFile, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, vectorFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            tmp = null;
             return true;
         } catch (IOException e) {
-            log.warn("向量落盘失败(不影响本次运行):{}", e.getMessage());
+            log.warn("向量落盘失败(旧 sidecar 保持不变):{}", e.getMessage());
             return false;
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignored) {
+                    // 清理临时文件失败不影响主结果
+                }
+            }
         }
     }
 }

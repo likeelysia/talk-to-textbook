@@ -1,15 +1,22 @@
 package io.github.likeelysia.formalagent.knowledge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.EmbeddingClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -84,6 +91,109 @@ class JsonKnowledgeStoreTest {
 
         JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0);
         assertEquals(0, reloaded.missingVectorCount(), "每批补齐后应已写入 sidecar");
+    }
+
+    @Test
+    @DisplayName("落盘失败不假装完成;故障解除后重试真的写入")
+    void backfillFailureDoesNotFakeCompletion() throws Exception {
+        store.addAll(List.of(item("1", "位移", "位置变化")));
+        Path sidecar = Path.of(file.toString().replaceAll("\\.json$", "") + ".vectors.json");
+        Files.createDirectory(sidecar);                 // 故意让 sidecar 路径不可写
+
+        assertThrows(AgentException.class, () -> store.backfillVectors(1));
+        assertEquals(1, store.missingVectorCount(), "失败后内存仍应保持未补齐");
+
+        Files.delete(sidecar);                          // 解除障碍
+        var result = store.backfillVectors(1);
+        assertTrue(result.complete());
+        assertTrue(Files.isRegularFile(sidecar), "重试必须真的写出 sidecar");
+        assertEquals(0, store.missingVectorCount());
+
+        JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0);
+        assertEquals(0, reloaded.missingVectorCount(), "重启后应从 sidecar 读到向量");
+    }
+
+    @Test
+    @DisplayName("慢补齐不阻塞普通查询")
+    void slowBackfillDoesNotBlockSearch() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        EmbeddingClient slowBackfill = new EmbeddingClient() {
+            @Override public float[] embed(String text) {
+                return new float[]{1f, 0f};
+            }
+            @Override public List<float[]> embedAll(List<String> texts) {
+                started.countDown();
+                try {
+                    release.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return texts.stream().map(t -> new float[]{1f, 0f}).toList();
+            }
+        };
+        Path slowFile = tmp.resolve("slow.json");
+        JsonKnowledgeStore slow = new JsonKnowledgeStore(mapper, slowBackfill, slowFile.toString(), 0);
+        slow.addAll(List.of(item("1", "IoC", "控制反转")));
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> backfill = pool.submit(() -> slow.backfillVectors(1));
+            assertTrue(started.await(1, TimeUnit.SECONDS), "补齐应已进入慢 embedding");
+            long t0 = System.nanoTime();
+            List<KnowledgeItem> hits = slow.search("控制反转", 5);
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            assertTrue(ms < 500, "慢补齐期间查询不应被锁住,实际 " + ms + "ms");
+            assertEquals(1, hits.size());
+            release.countDown();
+            backfill.get(2, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("补齐期间条目被删除:不提交过期向量")
+    void deletedDuringBackfillIsNotCommitted() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        EmbeddingClient slowBackfill = new EmbeddingClient() {
+            @Override public float[] embed(String text) { return new float[]{1f, 0f}; }
+            @Override public List<float[]> embedAll(List<String> texts) {
+                started.countDown();
+                try {
+                    release.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return texts.stream().map(t -> new float[]{1f, 0f}).toList();
+            }
+        };
+        JsonKnowledgeStore slow = new JsonKnowledgeStore(mapper, slowBackfill,
+                tmp.resolve("stale.json").toString(), 0);
+        slow.addAll(List.of(item("1", "IoC", "控制反转")));
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> backfill = pool.submit(() -> slow.backfillVectors(1));
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            slow.removeBySource("book.md");
+            release.countDown();
+            backfill.get(2, TimeUnit.SECONDS);
+            assertTrue(slow.get("1") == null);
+            assertEquals(0, slow.missingVectorCount(), "删除后没有条目需要补向量");
+            JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, FAKE,
+                    slowFileOf("stale.json").toString(), 0);
+            assertEquals(0, reloaded.count(), "重启后不应留下被删条目的向量/条目");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    private Path slowFileOf(String name) {
+        return tmp.resolve(name);
     }
 
     @Test
