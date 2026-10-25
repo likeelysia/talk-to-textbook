@@ -1,7 +1,7 @@
 # 知识库 JSON 流式读写优化记录
 
 日期：2026-10-25  
-状态：**本地验证通过，待鹏哥手动更新服务器；服务器当前仍运行旧 JAR**
+状态：**已在服务器启用；旧版保留可回滚**
 
 ## 1. 改动范围
 
@@ -76,30 +76,42 @@ TOTAL=440 FAIL=0 ERR=0 SKIP=1
 72A3473AC3523B10B94E0E9E0433221B02D6F2B50BCBA1FA6138126A2F776CD4
 ```
 
-## 7. 服务器手动更新步骤（不由本轮自动执行）
+## 7. 服务器更新结果
 
-服务器当前仍运行 `7829850`，数据目录不变。更新前先备份。
+已于 2026-10-25 在服务器完成更新；数据目录未改，旧版目录保留。
 
-1. 上传新 JAR 到临时目录，校验 SHA-256。
-2. 安装到新版本目录，保留旧版本：
-   ```bash
-   sudo install -d -m 0755 /opt/lamplit/releases/2eb600a
-   sudo install -o root -g root -m 0644 /home/admin/talk-to-textbook-0.1.0-2eb600a.jar \
-     /opt/lamplit/releases/2eb600a/app.jar
-   ```
-3. 停写备份当前 `/srv/lamplit`，确认归档和校验通过。
-4. 切换链接并重启：
-   ```bash
-   sudo ln -sfn /opt/lamplit/releases/2eb600a /opt/lamplit/current
-   sudo systemctl restart lamplit
-   ```
-5. 检查：
-   ```bash
-   sudo systemctl status lamplit --no-pager
-   curl -s http://127.0.0.1:8080/api/health
-   ```
-   预期 `knowledgeCount=7287`，内存应明显低于当前旧版；实际值以服务器为准。
-6. 浏览器重新登录，做一条文字问答、图片问答、背词查询和 Word 导出。
+实际步骤：
+
+```bash
+sudo install -d -m 0755 /opt/lamplit/releases/2eb600a
+sudo install -o root -g root -m 0644 /home/admin/talk-to-textbook-0.1.0-2eb600a.jar \
+  /opt/lamplit/releases/2eb600a/app.jar
+sudo ln -sfn /opt/lamplit/releases/2eb600a /opt/lamplit/current
+sudo systemctl restart lamplit
+```
+
+实际结果：
+
+```text
+readlink -f /opt/lamplit/current
+/opt/lamplit/releases/2eb600a
+
+systemctl is-active lamplit
+active
+
+/api/health
+{"status":"UP","degraded":true,"knowledgeCount":7287,
+ "embedding":{"status":"DOWN","model":"bge-m3"},
+ "vision":{"status":"UP","provider":"Kimi","model":"kimi-k2.6"}}
+
+MemoryCurrent=355065856
+MemoryPeak=355319808
+```
+
+- 服务器 `MemoryCurrent` 约 **355.1 MB**，峰值约 **355.3 MB**；旧版约 **958 MB / 1.07 GB**。
+- 数据没有改格式；两本教材 7287 条和生词/笔记/记忆均保留。
+- 更新过程中曾出现一次“切了链接但 JAR 未安装”的短暂失败，已先切回 `7829850` 恢复，再按“先装 JAR、后切链接”的顺序完成；旧版仍在，可回滚。
+- 浏览器会话会因重启失效，需要重新登录；这不影响数据。
 
 ## 8. 回滚
 
