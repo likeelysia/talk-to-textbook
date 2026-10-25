@@ -17,6 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -194,6 +196,84 @@ class JsonKnowledgeStoreTest {
 
     private Path slowFileOf(String name) {
         return tmp.resolve(name);
+    }
+
+    @Test
+    @DisplayName("默认阈值下,缺向量条目按单条关键词回退")
+    void missingVectorItemFallsBackToKeywordAtDefaultThreshold() {
+        JsonKnowledgeStore s = new JsonKnowledgeStore(mapper,
+                text -> text.contains("无关") ? new float[]{0f, 1f} : new float[]{1f, 0f},
+                tmp.resolve("threshold.json").toString(), 0.45);
+        s.addAll(List.of(
+                item("1", "sample", "精确关键词 sample"),
+                item("2", "other", "另一条内容")));
+
+        assertEquals("sample", s.search("sample", 5).get(0).name(),
+                "全部缺向量时,精确关键词应能过默认 0.45");
+        s.backfillVectors(1);                       // 只补第一条
+        assertEquals(1, s.missingVectorCount());
+        assertEquals("other", s.search("other", 5).get(0).name(),
+                "部分缺向量时,缺向量条目仍应按关键词命中");
+        assertTrue(s.search("完全无关的问题", 5).isEmpty(),
+                "关键词回退不能把无关问题硬塞进来");
+    }
+
+    @Test
+    @DisplayName("并发补齐单任务准入:第二次快速 busy,不重复调用 embedding")
+    void concurrentBackfillIsSingleFlight() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        EmbeddingClient slow = new EmbeddingClient() {
+            @Override public float[] embed(String text) { return new float[]{1f, 0f}; }
+            @Override public List<float[]> embedAll(List<String> texts) {
+                calls.incrementAndGet();
+                started.countDown();
+                try {
+                    release.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return texts.stream().map(t -> new float[]{1f, 0f}).toList();
+            }
+        };
+        JsonKnowledgeStore s = new JsonKnowledgeStore(mapper, slow,
+                tmp.resolve("singleflight.json").toString(), 0);
+        s.addAll(List.of(item("1", "IoC", "控制反转")));
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> first = pool.submit(() -> s.backfillVectors(1));
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            assertThrows(KnowledgeBackfillBusyException.class, () -> s.backfillVectors(1));
+            release.countDown();
+            first.get(2, TimeUnit.SECONDS);
+            assertEquals(1, calls.get(), "同一条只应计算一次");
+            assertEquals(0, s.missingVectorCount());
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("补齐异常会解除在途状态,后续重试成功")
+    void failedBackfillReleasesSingleFlightGate() {
+        AtomicBoolean first = new AtomicBoolean(true);
+        EmbeddingClient flaky = new EmbeddingClient() {
+            @Override public float[] embed(String text) { return new float[]{1f, 0f}; }
+            @Override public List<float[]> embedAll(List<String> texts) {
+                if (first.getAndSet(false)) throw new IllegalStateException("模拟网络失败");
+                return texts.stream().map(t -> new float[]{1f, 0f}).toList();
+            }
+        };
+        JsonKnowledgeStore s = new JsonKnowledgeStore(mapper, flaky,
+                tmp.resolve("flaky.json").toString(), 0);
+        s.addAll(List.of(item("1", "IoC", "控制反转")));
+
+        assertThrows(AgentException.class, () -> s.backfillVectors(1));
+        assertTrue(s.backfillVectors(1).complete(), "异常释放后应能重试成功");
+        assertEquals(0, s.missingVectorCount());
     }
 
     @Test

@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,6 +71,8 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     private final Object stateLock = new Object();
     /** 串行化所有写盘/提交动作,避免补齐与导入互相覆盖 sidecar;查询不拿它。 */
     private final ReentrantLock writeLock = new ReentrantLock();
+    /** 补齐任务单任务准入:覆盖选批+远程计算+提交,避免并发重复付费;查询不拿它。 */
+    private final AtomicBoolean backfillInFlight = new AtomicBoolean();
 
     public JsonKnowledgeStore(ObjectMapper mapper, EmbeddingClient embedder,
                               @Value("${fa.knowledge.file:knowledge/base.json}") String filePath,
@@ -290,10 +293,13 @@ public class JsonKnowledgeStore implements KnowledgeStore {
             int seq = 0;
             for (KnowledgeItem item : items.values()) {
                 float[] v = vectors.get(item.id());
-                double vectorScore = (hasVector && v != null) ? Vectors.cosine(queryVector, v) : 0;
+                boolean itemHasVector = hasVector && v != null;
+                double vectorScore = itemHasVector ? Vectors.cosine(queryVector, v) : 0;
                 double keywordScore = keywordScore(item, terms);
 
-                double score = hasVector
+                // 按“这一条实际可用的通道”评分:缺向量的条目不能只拿 0.3×关键词分,
+                // 否则默认 min-score=0.45 时会被误杀。向量完整条目仍走原混合评分。
+                double score = itemHasVector
                         ? VECTOR_WEIGHT * vectorScore + (1 - VECTOR_WEIGHT) * keywordScore
                         : keywordScore;
                 if (score <= 0 || score < minScore) continue;       // 阈值:不够相关就当没找到
@@ -340,64 +346,71 @@ public class JsonKnowledgeStore implements KnowledgeStore {
      */
     @Override
     public VectorBackfillResult backfillVectors(int limit) {
-        List<KnowledgeItem> batch;
-        int total;
-        synchronized (stateLock) {
-            total = items.size();
-            batch = items.values().stream()
-                    .filter(k -> vectors.get(k.id()) == null)
-                    .limit(Math.max(1, Math.min(limit, Math.max(1, items.size()))))
+        if (!backfillInFlight.compareAndSet(false, true)) {
+            throw new KnowledgeBackfillBusyException();
+        }
+        try {
+            List<KnowledgeItem> batch;
+            int total;
+            synchronized (stateLock) {
+                total = items.size();
+                batch = items.values().stream()
+                        .filter(k -> vectors.get(k.id()) == null)
+                        .limit(Math.max(1, Math.min(limit, Math.max(1, items.size()))))
+                        .toList();
+            }
+            if (batch.isEmpty()) return new VectorBackfillResult(0, 0, total, true);
+
+            List<String> texts = batch.stream()
+                    .map(k -> k.name() + " " + (k.detail() == null ? "" : k.detail()))
                     .toList();
-        }
-        if (batch.isEmpty()) return new VectorBackfillResult(0, 0, total, true);
 
-        List<String> texts = batch.stream()
-                .map(k -> k.name() + " " + (k.detail() == null ? "" : k.detail()))
-                .toList();
+            List<float[]> computed;
+            try {
+                computed = embedder.embedAll(texts);       // 慢网络在锁外
+            } catch (RuntimeException e) {
+                throw new AgentException("向量补齐失败(embedding 不可用):" + e.getMessage(), e);
+            }
+            if (computed == null || computed.size() != batch.size()) {
+                throw new AgentException("向量补齐失败:模型返回数量与请求不一致");
+            }
 
-        List<float[]> computed;
-        try {
-            computed = embedder.embedAll(texts);       // 慢网络在锁外
-        } catch (RuntimeException e) {
-            throw new AgentException("向量补齐失败(embedding 不可用):" + e.getMessage(), e);
-        }
-        if (computed == null || computed.size() != batch.size()) {
-            throw new AgentException("向量补齐失败:模型返回数量与请求不一致");
-        }
-
-        writeLock.lock();
-        try {
-            Map<String, float[]> merged;
-            Map<String, float[]> accepted = new LinkedHashMap<>();
-            synchronized (stateLock) {
-                for (int i = 0; i < batch.size(); i++) {
-                    KnowledgeItem item = batch.get(i);
-                    KnowledgeItem current = items.get(item.id());
-                    // 计算期间被删除/替换的条目,不能把过期向量提交进去。
-                    if (current != null && Objects.equals(current, item)
-                            && vectors.get(item.id()) == null) {
-                        accepted.put(item.id(), computed.get(i));
+            writeLock.lock();
+            try {
+                Map<String, float[]> merged;
+                Map<String, float[]> accepted = new LinkedHashMap<>();
+                synchronized (stateLock) {
+                    for (int i = 0; i < batch.size(); i++) {
+                        KnowledgeItem item = batch.get(i);
+                        KnowledgeItem current = items.get(item.id());
+                        // 计算期间被删除/替换的条目,不能把过期向量提交进去。
+                        if (current != null && Objects.equals(current, item)
+                                && vectors.get(item.id()) == null) {
+                            accepted.put(item.id(), computed.get(i));
+                        }
                     }
+                    if (accepted.isEmpty()) {
+                        int missing = missingVectorCountLocked();
+                        return new VectorBackfillResult(0, missing, items.size(), missing == 0);
+                    }
+                    merged = new LinkedHashMap<>(vectors);
+                    merged.putAll(accepted);
                 }
-                if (accepted.isEmpty()) {
-                    int missing = missingVectorCountLocked();
-                    return new VectorBackfillResult(0, missing, items.size(), missing == 0);
-                }
-                merged = new LinkedHashMap<>(vectors);
-                merged.putAll(accepted);
-            }
 
-            // 写入成功前不改内存;失败时旧 sidecar 保持完整,重试会重新计算。
-            if (!writeVectors(merged)) {
-                throw new AgentException("向量补齐已计算,但 sidecar 落盘失败;下次会重试");
-            }
-            synchronized (stateLock) {
-                vectors.putAll(accepted);
-                int remaining = missingVectorCountLocked();
-                return new VectorBackfillResult(accepted.size(), remaining, items.size(), remaining == 0);
+                // 写入成功前不改内存;失败时旧 sidecar 保持完整,重试会重新计算。
+                if (!writeVectors(merged)) {
+                    throw new AgentException("向量补齐已计算,但 sidecar 落盘失败;下次会重试");
+                }
+                synchronized (stateLock) {
+                    vectors.putAll(accepted);
+                    int remaining = missingVectorCountLocked();
+                    return new VectorBackfillResult(accepted.size(), remaining, items.size(), remaining == 0);
+                }
+            } finally {
+                writeLock.unlock();
             }
         } finally {
-            writeLock.unlock();
+            backfillInFlight.set(false);       // 异常/写盘失败也必须释放,后续可重试
         }
     }
 

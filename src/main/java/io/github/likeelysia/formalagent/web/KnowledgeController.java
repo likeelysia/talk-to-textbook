@@ -1,16 +1,19 @@
 package io.github.likeelysia.formalagent.web;
 
+import io.github.likeelysia.formalagent.knowledge.KnowledgeBackfillBusyException;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeItem;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeStore;
 import io.github.likeelysia.formalagent.knowledge.SourceResolver;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * 知识库概况与来源管理。
@@ -70,8 +73,7 @@ public class KnowledgeController {
     @GetMapping("/knowledge/item")
     public KnowledgeItem item(@RequestParam("id") String id) {
         KnowledgeItem item = store.get(id);
-        if (item == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.NOT_FOUND, "knowledge item not found");
+        if (item == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "knowledge item not found");
         return item;
     }
 
@@ -90,7 +92,11 @@ public class KnowledgeController {
     @PostMapping("/knowledge/vectors/backfill")
     public KnowledgeStore.VectorBackfillResult backfillVectors(
             @RequestParam(defaultValue = "1000") int limit) {
-        return store.backfillVectors(Math.max(1, Math.min(limit, 2000)));
+        try {
+            return store.backfillVectors(Math.max(1, Math.min(limit, 2000)));
+        } catch (KnowledgeBackfillBusyException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
     }
 
     /** 按来源删除;name 可只写文件名的一部分,但只有唯一命中才动手(见 {@link SourceResolver})。 */
