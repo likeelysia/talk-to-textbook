@@ -138,7 +138,7 @@ public class IngestMain {
             System.out.println("知识库是空的。");
             return;
         }
-        System.out.println("知识库共 " + store.all().size() + " 条,来自 " + counts.size() + " 个来源:");
+        System.out.println("知识库共 " + store.count() + " 条,来自 " + counts.size() + " 个来源:");
         counts.forEach((source, n) -> System.out.println("  " + source + " —— " + n + " 条"));
     }
 
@@ -163,7 +163,7 @@ public class IngestMain {
         String source = SourceResolver.resolve(store, nameOrPart);     // 先核对,别删错书
         int removed = store.removeBySource(source);
         System.out.println("已删除来源 \"" + source + "\" 的 " + removed
-                + " 条 → 知识库现有 " + store.all().size() + " 条");
+                + " 条 → 知识库现有 " + store.count() + " 条");
     }
 
     private static void ingestFile(CheckpointIngestService ingest, KnowledgeStore store,

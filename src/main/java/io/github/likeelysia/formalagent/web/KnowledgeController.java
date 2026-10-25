@@ -4,10 +4,10 @@ import io.github.likeelysia.formalagent.knowledge.KnowledgeItem;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeStore;
 import io.github.likeelysia.formalagent.knowledge.SourceResolver;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,16 +35,62 @@ public class KnowledgeController {
 
     @GetMapping("/knowledge")
     public Map<String, Object> knowledge(@RequestParam(defaultValue = "5") int sample) {
-        List<KnowledgeItem> all = store.all();
+        int safeSample = Math.max(0, Math.min(sample, 100));
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("count", all.size());
-        body.put("sources", all.stream().map(KnowledgeItem::source).distinct().toList());
+        body.put("count", store.count());
+        body.put("sources", store.sources());
         body.put("sourceCounts", store.countsBySource());
-        body.put("sample", all.stream()
-                .limit(Math.max(0, sample))
+        body.put("sample", store.page(0, safeSample).stream()
                 .map(k -> k.name() + " / " + k.location())
                 .toList());
         return body;
+    }
+
+    /** 只查总数,不复制全库。 */
+    @GetMapping("/knowledge/count")
+    public Map<String, Object> count() {
+        return Map.of("count", store.count());
+    }
+
+    /** 分页读取知识点,给管理端/大库检查用,不触发全库复制。 */
+    @GetMapping("/knowledge/page")
+    public Map<String, Object> page(@RequestParam(defaultValue = "0") int offset,
+                                    @RequestParam(defaultValue = "20") int limit) {
+        int safeOffset = Math.max(0, offset);
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("count", store.count());
+        body.put("offset", safeOffset);
+        body.put("limit", safeLimit);
+        body.put("items", store.page(safeOffset, safeLimit));
+        return body;
+    }
+
+    /** 按稳定 id 读取单条;找不到返回 404。 */
+    @GetMapping("/knowledge/item")
+    public KnowledgeItem item(@RequestParam("id") String id) {
+        KnowledgeItem item = store.get(id);
+        if (item == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND, "knowledge item not found");
+        return item;
+    }
+
+    /** 向量补齐状态;管理端用 X-Admin-Key 调用。 */
+    @GetMapping("/knowledge/vectors/status")
+    public Map<String, Object> vectorStatus() {
+        int total = store.count();
+        int missing = store.missingVectorCount();
+        return Map.of("total", total, "missing", missing, "complete", missing == 0);
+    }
+
+    /**
+     * 显式补一批向量;每批落盘后返回 remaining,可重复调用直到 complete=true。
+     * 查询路径不会自动触发它。
+     */
+    @PostMapping("/knowledge/vectors/backfill")
+    public KnowledgeStore.VectorBackfillResult backfillVectors(
+            @RequestParam(defaultValue = "50") int limit) {
+        return store.backfillVectors(Math.max(1, Math.min(limit, 1000)));
     }
 
     /** 按来源删除;name 可只写文件名的一部分,但只有唯一命中才动手(见 {@link SourceResolver})。 */

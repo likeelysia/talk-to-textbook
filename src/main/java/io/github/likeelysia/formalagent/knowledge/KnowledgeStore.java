@@ -40,4 +40,38 @@ public interface KnowledgeStore {
 
     /** 各来源的条目数(保序,给列表展示用)。 */
     Map<String, Integer> countsBySource();
+
+    /** 总条数;默认从 all() 算,具体实现应覆盖成 O(1)。 */
+    default int count() {
+        return all().size();
+    }
+
+    /** 分页取知识点;接口默认实现只是兜底,具体实现应避免复制全库。 */
+    default List<KnowledgeItem> page(int offset, int limit) {
+        if (offset < 0 || limit <= 0) return List.of();
+        return all().stream().skip(offset).limit(limit).toList();
+    }
+
+    /** 按稳定 id 读取单条;找不到返回 null。 */
+    default KnowledgeItem get(String id) {
+        if (id == null) return null;
+        return all().stream().filter(k -> id.equals(k.id())).findFirst().orElse(null);
+    }
+
+    /** 还没有向量的条目数。 */
+    default int missingVectorCount() {
+        return 0;
+    }
+
+    /**
+     * 显式补齐一批向量(不是查询路径的隐式行为)。
+     * 默认实现表示该存储不支持/不需要向量补齐。
+     */
+    default VectorBackfillResult backfillVectors(int limit) {
+        throw new UnsupportedOperationException("该 KnowledgeStore 不支持向量补齐");
+    }
+
+    /** 分批补向量的结果;每批落盘后 remaining 才是可恢复的。 */
+    record VectorBackfillResult(int processed, int remaining, int total, boolean complete) {
+    }
 }

@@ -43,7 +43,8 @@ public class HealthController {
         body.put("status", "UP");
         // 语义检索挂掉 = 服务还活着但"变笨了", 单独给监控一个信号
         body.put("degraded", !"UP".equals(embeddingStatus));
-        body.put("knowledgeCount", store.all().size());
+        body.put("knowledgeCount", store.count());
+        body.put("missingVectors", store.missingVectorCount());
         body.put("embedding", Map.of("status", embeddingStatus, "model", embedding.modelName()));
 
         // 视觉链路:报「哪家 + 哪个模型 + 配没配好」,方便一眼看出换模型有没有换成功

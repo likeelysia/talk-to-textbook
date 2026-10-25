@@ -61,6 +61,32 @@ class JsonKnowledgeStoreTest {
     }
 
     @Test
+    @DisplayName("查询不会自动补向量;显式分批补齐可恢复且落盘")
+    void queryDoesNotBackfillAndBackfillIsResumable() {
+        store.addAll(List.of(
+                item("1", "位移", "质点从A到B位置矢量的增量"),
+                item("2", "线程", "进程里的执行单元")));
+        assertEquals(2, store.missingVectorCount(), "addAll 不应再自动算向量");
+
+        store.search("位移", 5);
+        assertEquals(2, store.missingVectorCount(), "搜索路径不应隐式补齐全库");
+
+        var first = store.backfillVectors(1);
+        assertEquals(1, first.processed());
+        assertEquals(1, first.remaining());
+        assertTrue(!first.complete());
+
+        var second = store.backfillVectors(1);
+        assertEquals(1, second.processed());
+        assertEquals(0, second.remaining());
+        assertTrue(second.complete());
+        assertEquals(0, store.missingVectorCount());
+
+        JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0);
+        assertEquals(0, reloaded.missingVectorCount(), "每批补齐后应已写入 sidecar");
+    }
+
+    @Test
     @DisplayName("同 id 覆盖,不重复")
     void sameIdOverwrites() {
         store.addAll(List.of(item("1", "IoC", "旧")));
@@ -75,6 +101,7 @@ class JsonKnowledgeStoreTest {
         store.addAll(List.of(
                 item("1", "位移", "质点从A到B位置矢量的增量"),
                 item("2", "线程", "进程里的执行单元")));
+        store.backfillVectors(10);
 
         // 查询"物体挪动前后的位置差" —— 与条目1的**字面完全不同**
         List<KnowledgeItem> hits = store.search("物体挪动前后的位置差", 5);
@@ -125,11 +152,13 @@ class JsonKnowledgeStoreTest {
         JsonKnowledgeStore loose = new JsonKnowledgeStore(mapper, angled,
                 tmp.resolve("loose.json").toString(), 0.3);
         loose.addAll(List.of(item("1", "位移", "位置变化")));
+        loose.backfillVectors(10);
         assertEquals(1, loose.search("另一个话题", 5).size(), "阈值 0.3 → 0.35 分应保留");
 
         JsonKnowledgeStore strict = new JsonKnowledgeStore(mapper, angled,
                 tmp.resolve("strict.json").toString(), 0.5);
         strict.addAll(List.of(item("1", "位移", "位置变化")));
+        strict.backfillVectors(10);
         assertTrue(strict.search("另一个话题", 5).isEmpty(), "阈值 0.5 → 0.35 分该被过滤");
     }
 
@@ -142,6 +171,7 @@ class JsonKnowledgeStoreTest {
         store.addAll(List.of(
                 item("1", "路程", "质点走过的路径长度"),
                 item("2", "线程", "进程里的执行单元")));
+        store.backfillVectors(10);
 
         List<KnowledgeItem> hits = store.search("路程", 5);
 
@@ -154,6 +184,7 @@ class JsonKnowledgeStoreTest {
         store.addAll(List.of(
                 item("1", "IoC", "控制反转,把创建对象的权力交给容器"),
                 item("2", "线程", "进程里的执行单元")));
+        store.backfillVectors(10);
 
         EmbeddingClient differentModel = new EmbeddingClient() {
             @Override public float[] embed(String text) {
@@ -237,7 +268,8 @@ class JsonKnowledgeStoreTest {
         store.addAll(List.of(
                 new KnowledgeItem("a1", "A1", "d", "bookA.pdf", null, "pdf"),
                 new KnowledgeItem("b1", "B1", "d", "bookB.pdf", null, "pdf")));
-        assertEquals(2, vectorCount(), "加进来就该顺带算好 2 条向量");
+        store.backfillVectors(10);
+        assertEquals(2, vectorCount(), "显式补齐后应有 2 条向量");
 
         store.removeBySource("bookA.pdf");
 

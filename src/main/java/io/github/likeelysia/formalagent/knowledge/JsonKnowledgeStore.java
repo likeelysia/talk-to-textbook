@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.PriorityQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,8 +51,8 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     record VectorFile(String model, int dim, Map<String, float[]> vectors) {
     }
 
-    /** 排序用的临时结构:知识点 + 得分。 */
-    private record Scored(KnowledgeItem item, double score) {
+    /** 排序用的临时结构:知识点 + 得分 + 原顺序(同分时保持稳定)。 */
+    private record Scored(KnowledgeItem item, double score, int seq) {
     }
 
     private final ObjectMapper mapper;
@@ -147,12 +148,27 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     public void addAll(List<KnowledgeItem> newItems) {
         for (KnowledgeItem item : newItems) items.put(item.id(), item);   // 同 id 覆盖
         persist();
-        ensureVectors();                                                  // 顺手把新条目的向量算好
     }
 
     @Override
     public List<KnowledgeItem> all() {
         return List.copyOf(items.values());
+    }
+
+    @Override
+    public int count() {
+        return items.size();
+    }
+
+    @Override
+    public List<KnowledgeItem> page(int offset, int limit) {
+        if (offset < 0 || limit <= 0) return List.of();
+        return items.values().stream().skip(offset).limit(limit).toList();
+    }
+
+    @Override
+    public KnowledgeItem get(String id) {
+        return id == null ? null : items.get(id);
     }
 
     // ---------------------------------------------------------------- 删除 / 替换(按来源)
@@ -197,7 +213,6 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         for (KnowledgeItem item : newItems) items.put(item.id(), item); // ② 整份换成新的
         purgeOrphanVectors();
         persist();
-        ensureVectors();
         log.info("重灌来源 {}:清掉旧条目 {} 条,新收录 {} 条", source, removed, newItems.size());
         return newItems.size();
     }
@@ -210,17 +225,20 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     // ---------------------------------------------------------------- 检索(hybrid + 阈值)
 
     @Override
-    public List<KnowledgeItem> search(String query, int topK) {
-        if (query == null || query.isBlank() || items.isEmpty()) return List.of();
-
-        if (vectors.size() < items.size()) ensureVectors();     // 自愈:服务恢复后自动补齐
+    public synchronized List<KnowledgeItem> search(String query, int topK) {
+        if (query == null || query.isBlank() || items.isEmpty() || topK <= 0) return List.of();
 
         List<String> terms = tokenize(query);
         float[] queryVector = tryEmbed(query);
         boolean hasVector = queryVector != null;
         if (!hasVector && terms.isEmpty()) return List.of();
 
-        List<Scored> scored = new ArrayList<>();
+        int k = Math.min(topK, items.size());
+        // 有界小顶堆:只保留当前最好的 k 条,O(N log K),不再把全库命中装进 List 再全排序。
+        PriorityQueue<Scored> heap = new PriorityQueue<>(
+                Comparator.comparingDouble(Scored::score)
+                        .thenComparing(Scored::seq, Comparator.reverseOrder()));
+        int seq = 0;
         for (KnowledgeItem item : items.values()) {
             float[] v = vectors.get(item.id());
             double vectorScore = (hasVector && v != null) ? Vectors.cosine(queryVector, v) : 0;
@@ -230,11 +248,18 @@ public class JsonKnowledgeStore implements KnowledgeStore {
                     ? VECTOR_WEIGHT * vectorScore + (1 - VECTOR_WEIGHT) * keywordScore
                     : keywordScore;
             if (score <= 0 || score < minScore) continue;       // 阈值:不够相关就当没找到
-            scored.add(new Scored(item, score));
+            Scored candidate = new Scored(item, score, seq++);
+            if (heap.size() < k) {
+                heap.add(candidate);
+            } else if (score > heap.peek().score()) {
+                heap.poll();
+                heap.add(candidate);
+            }
         }
 
-        scored.sort(Comparator.comparingDouble(Scored::score).reversed());
-        List<Scored> top = scored.subList(0, Math.min(Math.max(0, topK), scored.size()));
+        List<Scored> top = new ArrayList<>(heap);
+        top.sort(Comparator.comparingDouble(Scored::score).reversed()
+                .thenComparingInt(Scored::seq));
         if (log.isDebugEnabled()) {
             top.forEach(s -> log.debug("检索命中 {}(score={}, 向量={})",
                     s.item().name(), String.format(Locale.ROOT, "%.3f", s.score()),
@@ -243,25 +268,51 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         return top.stream().map(Scored::item).toList();
     }
 
-    /** 把条目向量补齐;失败即止(说明服务没开),不逐条傻等。 */
-    private void ensureVectors() {
+    @Override
+    public int missingVectorCount() {
+        int missing = 0;
+        for (KnowledgeItem item : items.values()) {
+            if (vectors.get(item.id()) == null) missing++;
+        }
+        return missing;
+    }
+
+    /**
+     * 显式、分批、可恢复地补向量:每批算完立即写 sidecar,进程中断后再次调用会从剩余条目继续。
+     * 查询路径不再调用它;embedding 服务没开时直接报错,由管理端决定何时重试。
+     */
+    @Override
+    public synchronized VectorBackfillResult backfillVectors(int limit) {
+        int total = items.size();
         List<KnowledgeItem> missing = items.values().stream()
                 .filter(k -> vectors.get(k.id()) == null)
                 .toList();
-        if (missing.isEmpty()) return;
+        if (missing.isEmpty()) return new VectorBackfillResult(0, 0, total, true);
 
-        List<String> texts = missing.stream()
+        int batchSize = Math.max(1, Math.min(limit, missing.size()));
+        List<KnowledgeItem> batch = missing.subList(0, batchSize);
+        List<String> texts = batch.stream()
                 .map(k -> k.name() + " " + (k.detail() == null ? "" : k.detail()))
                 .toList();
+
+        List<float[]> computed;
         try {
-            List<float[]> computed = embedder.embedAll(texts);
-            for (int i = 0; i < missing.size(); i++) {
-                vectors.put(missing.get(i).id(), computed.get(i));
-            }
-            persistVectors();
+            computed = embedder.embedAll(texts);
         } catch (RuntimeException e) {
-            log.warn("embedding 服务不可用,暂用关键词检索:{}", e.getMessage());
+            throw new AgentException("向量补齐失败(embedding 不可用):" + e.getMessage(), e);
         }
+        if (computed == null || computed.size() != batch.size()) {
+            throw new AgentException("向量补齐失败:模型返回数量与请求不一致");
+        }
+        for (int i = 0; i < batch.size(); i++) {
+            vectors.put(batch.get(i).id(), computed.get(i));
+        }
+        if (!persistVectors()) {
+            throw new AgentException("向量补齐已计算,但 sidecar 落盘失败;下次会重试");
+        }
+
+        int remaining = missing.size() - batchSize;
+        return new VectorBackfillResult(batchSize, remaining, total, remaining == 0);
     }
 
     private float[] tryEmbed(String text) {
@@ -307,8 +358,8 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         }
     }
 
-    /** 向量落盘失败不该影响本次运行(顶多下次重算)。 */
-    private void persistVectors() {
+    /** 向量落盘失败不该影响普通写入;显式补向量流程会检查返回值并报错。 */
+    private boolean persistVectors() {
         try {
             Path parent = vectorFile.toAbsolutePath().getParent();
             if (parent != null) Files.createDirectories(parent);
@@ -316,8 +367,10 @@ public class JsonKnowledgeStore implements KnowledgeStore {
             try (OutputStream out = Files.newOutputStream(vectorFile)) {
                 mapper.writeValue(out, new VectorFile(embedder.modelName(), dim, vectors));
             }
+            return true;
         } catch (IOException e) {
             log.warn("向量落盘失败(不影响本次运行):{}", e.getMessage());
+            return false;
         }
     }
 }

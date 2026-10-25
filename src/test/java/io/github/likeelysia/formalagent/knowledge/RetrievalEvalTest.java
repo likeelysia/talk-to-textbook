@@ -160,6 +160,7 @@ class RetrievalEvalTest {
         store.addAll(List.of(
                 new KnowledgeItem("1", "位移", "质点从A到B位置矢量的增量", "book.pdf", "第 1 页", "pdf"),
                 new KnowledgeItem("2", "线程", "进程里的执行单元", "book.pdf", "第 2 页", "pdf")));
+        store.backfillVectors(10);
 
         Metrics m = evaluate(store, List.of(
                 new EvalCase("物体挪动前后的位置差", "位移", "第 1 页"),

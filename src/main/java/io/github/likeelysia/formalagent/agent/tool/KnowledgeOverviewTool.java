@@ -1,12 +1,8 @@
 package io.github.likeelysia.formalagent.agent.tool;
 
 import io.github.likeelysia.formalagent.agent.Tool;
-import io.github.likeelysia.formalagent.knowledge.KnowledgeItem;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeStore;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 /** 工具二:知识库"全局概况"(总条数 + 各来源分布)。回答"教材里都有什么/多少"这类全局问题。 */
@@ -37,14 +33,12 @@ public class KnowledgeOverviewTool implements Tool {
 
     @Override
     public String execute(Map<String, Object> args) {
-        List<KnowledgeItem> all = store.all();
-        if (all.isEmpty()) return "知识库是空的(还没有导入任何教材)。";
+        int total = store.count();
+        if (total == 0) return "知识库是空的(还没有导入任何教材)。";
 
-        Map<String, Long> bySource = all.stream().collect(Collectors.groupingBy(
-                k -> k.source() == null ? "(未知来源)" : k.source(),
-                LinkedHashMap::new, Collectors.counting()));
+        Map<String, Integer> bySource = store.countsBySource();
 
-        StringBuilder sb = new StringBuilder("知识库共 ").append(all.size()).append(" 条知识点,来源:\n");
+        StringBuilder sb = new StringBuilder("知识库共 ").append(total).append(" 条知识点,来源:\n");
         bySource.forEach((source, count) ->
                 sb.append("- ").append(source).append(":").append(count).append(" 条\n"));
         return sb.toString();
