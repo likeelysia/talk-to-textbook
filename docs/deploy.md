@@ -37,12 +37,14 @@
 
 ### 1.3 10 万点检索减负候选包（2026-10-25，未自动上线）
 
-- 提交：`e04b5a1 perf(knowledge): 查询减负与显式向量补齐`
-- JAR：`dist/talk-to-textbook-0.1.0-e04b5a1.jar`
-- SHA-256：`0FFBD026C8BFADD28D6015D9732DE23838F34300B0E23A30FA497D96DBE99D5F`
+- 提交：`7cb4643 fix(knowledge): 补齐落盘失败恢复与查询并发`
+- JAR：`dist/talk-to-textbook-0.1.0-7cb4643.jar`
+- SHA-256：`072F9E6344CF4679EFE899CBE281390F6C9C435BDDAFF0B18D5AB5D6499F1FE2`
 - 查询路径不再自动补齐向量；新增 `count/page/item`、`vectors/status`、`vectors/backfill`；Top-K 改为有界堆。
-- 本地 `-Xmx768m` 合成数据：10k 稳定 380.9 MB / p50 13 ms；30k 541.7 MB / p50 38 ms；100k 889.0 MB / p50 124 ms（仅存储层检索，不含 embedding/LLM，详见 `docs/knowledge-scale.md`）。
-- 真实教材回归：recall@5 0.85、MRR 0.77、页命中 0.88、拒答 1.00；测试 443 通过 / 0 失败 / 0 跳过。
+- 补齐落盘改为临时文件+原子替换，失败后重试不会误报完成；慢 embedding 不持有查询锁，提交前校验条目未被删除/替换。
+- 本地 `-Xmx768m` 合成数据：10k 稳定 380.9–527.5 MB、p50 13 ms；30k 530.3–541.7 MB、p50 38–43 ms；100k 889.0–1018.1 MB、p50 124–167 ms（仅存储层检索，不含 embedding/LLM，详见 `docs/knowledge-scale.md`）。
+- 真实教材回归：recall@5 0.85、MRR 0.77、页命中 0.88、拒答 1.00；测试 446 通过 / 0 失败 / 0 跳过。
+- 补齐写放大实测：10k/1000 约累计写 226 MB；10k/100 约写 2.08 GB；30k/1000 约写 1.91 GB；100k/1000 估算约 20.8 GB（未实跑）。
 - **服务器仍运行 `2eb600a`；候选包由鹏哥手动更新，不能把本地 100k 结果写成服务器已验收。**
 
 ## 2. 服务器建议
