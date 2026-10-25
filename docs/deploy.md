@@ -35,6 +35,16 @@
 - 测试：440 通过 / 0 失败 / 1 跳过。
 - 详细对照与回滚见 `docs/knowledge-streaming.md`。
 
+### 1.3 10 万点检索减负候选包（2026-10-25，未自动上线）
+
+- 提交：`e04b5a1 perf(knowledge): 查询减负与显式向量补齐`
+- JAR：`dist/talk-to-textbook-0.1.0-e04b5a1.jar`
+- SHA-256：`0FFBD026C8BFADD28D6015D9732DE23838F34300B0E23A30FA497D96DBE99D5F`
+- 查询路径不再自动补齐向量；新增 `count/page/item`、`vectors/status`、`vectors/backfill`；Top-K 改为有界堆。
+- 本地 `-Xmx768m` 合成数据：10k 稳定 380.9 MB / p50 13 ms；30k 541.7 MB / p50 38 ms；100k 889.0 MB / p50 124 ms（仅存储层检索，不含 embedding/LLM，详见 `docs/knowledge-scale.md`）。
+- 真实教材回归：recall@5 0.85、MRR 0.77、页命中 0.88、拒答 1.00；测试 443 通过 / 0 失败 / 0 跳过。
+- **服务器仍运行 `2eb600a`；候选包由鹏哥手动更新，不能把本地 100k 结果写成服务器已验收。**
+
 ## 2. 服务器建议
 
 | 项目 | 最低 | 建议 |
