@@ -148,6 +148,27 @@ class JsonKnowledgeStoreTest {
         assertEquals("路程", hits.get(0).name(), "字面命中的应排前面(关键词那 0.3 是关键)");
     }
 
+    @Test
+    @DisplayName("向量模型指纹不匹配:旧向量不加载,关键词检索仍可用")
+    void vectorModelMismatchFallsBackToKeyword() {
+        store.addAll(List.of(
+                item("1", "IoC", "控制反转,把创建对象的权力交给容器"),
+                item("2", "线程", "进程里的执行单元")));
+
+        EmbeddingClient differentModel = new EmbeddingClient() {
+            @Override public float[] embed(String text) {
+                throw new IllegalStateException("模型不匹配时不应调用");
+            }
+            @Override public String modelName() {
+                return "different-model";
+            }
+        };
+        JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, differentModel, file.toString(), 0);
+
+        assertEquals(2, reloaded.all().size(), "知识点本体仍应加载");
+        assertEquals(1, reloaded.search("控制反转", 5).size(), "旧向量作废后应退回关键词");
+    }
+
     // ---------------------------------------------------------------- 删除 / 替换
 
     @Test

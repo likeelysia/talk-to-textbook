@@ -1,12 +1,14 @@
 package io.github.likeelysia.formalagent.knowledge;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.EmbeddingClient;
 import io.github.likeelysia.formalagent.llm.Vectors;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -76,11 +78,12 @@ public class JsonKnowledgeStore implements KnowledgeStore {
 
     private void load() {
         if (Files.exists(file)) {
-            try {
-                List<KnowledgeItem> loaded = mapper.readValue(
-                        Files.readString(file, StandardCharsets.UTF_8),
-                        new TypeReference<List<KnowledgeItem>>() {});
-                for (KnowledgeItem item : loaded) items.put(item.id(), item);
+            try (MappingIterator<KnowledgeItem> it =
+                         mapper.readerFor(KnowledgeItem.class).readValues(file.toFile())) {
+                while (it.hasNextValue()) {
+                    KnowledgeItem item = it.nextValue();
+                    items.put(item.id(), item);
+                }
             } catch (IOException e) {
                 throw new AgentException("读取知识库失败:" + file, e);
             }
@@ -90,19 +93,54 @@ public class JsonKnowledgeStore implements KnowledgeStore {
 
     private void loadVectors() {
         if (!Files.exists(vectorFile)) return;
-        try {
-            VectorFile vf = mapper.readValue(
-                    Files.readString(vectorFile, StandardCharsets.UTF_8), VectorFile.class);
-            if (!embedder.modelName().equals(vf.model())) {      // 模型换了 → 旧向量作废
-                log.info("embedding 模型变了({} → {}),旧向量作废,下次检索时重算", vf.model(), embedder.modelName());
+        String model = readVectorModel();
+        if (model == null || !embedder.modelName().equals(model)) {
+            if (model != null) {
+                log.info("embedding 模型变了({} → {}),旧向量作废,下次检索时重算", model, embedder.modelName());
+            }
+            return;
+        }
+        try (JsonParser p = mapper.getFactory().createParser(vectorFile.toFile())) {
+            if (p.nextToken() != JsonToken.START_OBJECT) {
+                log.warn("向量文件格式不对,将重算:{}", vectorFile);
                 return;
             }
-            vf.vectors().forEach((id, v) -> {
-                if (items.containsKey(id)) vectors.put(id, v);
-            });
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                String field = p.currentName();
+                JsonToken token = p.nextToken();
+                if ("vectors".equals(field) && token == JsonToken.START_OBJECT) {
+                    while (p.nextToken() != JsonToken.END_OBJECT) {
+                        String id = p.currentName();
+                        p.nextToken();
+                        if (items.containsKey(id)) {
+                            vectors.put(id, mapper.readValue(p, float[].class));
+                        } else {
+                            p.skipChildren();
+                        }
+                    }
+                } else {
+                    p.skipChildren();
+                }
+            }
         } catch (IOException e) {
             log.warn("向量文件读取失败,将重算:{}", e.getMessage());
         }
+    }
+
+    /** 先只读 sidecar 的 model 字段;向量字段再按流解析,不构造整份中间对象。 */
+    private String readVectorModel() {
+        try (JsonParser p = mapper.getFactory().createParser(vectorFile.toFile())) {
+            if (p.nextToken() != JsonToken.START_OBJECT) return null;
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                String field = p.currentName();
+                p.nextToken();
+                if ("model".equals(field)) return p.getText();
+                p.skipChildren();
+            }
+        } catch (IOException e) {
+            log.warn("向量文件读取失败,将重算:{}", e.getMessage());
+        }
+        return null;
     }
 
     @Override
@@ -261,9 +299,9 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         try {
             Path parent = file.toAbsolutePath().getParent();
             if (parent != null) Files.createDirectories(parent);
-            Files.writeString(file,
-                    mapper.writerWithDefaultPrettyPrinter().writeValueAsString(List.copyOf(items.values())),
-                    StandardCharsets.UTF_8);
+            try (OutputStream out = Files.newOutputStream(file)) {
+                mapper.writerWithDefaultPrettyPrinter().writeValue(out, items.values());
+            }
         } catch (IOException e) {
             throw new AgentException("写入知识库失败:" + file, e);
         }
@@ -275,9 +313,9 @@ public class JsonKnowledgeStore implements KnowledgeStore {
             Path parent = vectorFile.toAbsolutePath().getParent();
             if (parent != null) Files.createDirectories(parent);
             int dim = vectors.values().stream().findFirst().map(v -> v.length).orElse(0);
-            Files.writeString(vectorFile,
-                    mapper.writeValueAsString(new VectorFile(embedder.modelName(), dim, vectors)),
-                    StandardCharsets.UTF_8);
+            try (OutputStream out = Files.newOutputStream(vectorFile)) {
+                mapper.writeValue(out, new VectorFile(embedder.modelName(), dim, vectors));
+            }
         } catch (IOException e) {
             log.warn("向量落盘失败(不影响本次运行):{}", e.getMessage());
         }
