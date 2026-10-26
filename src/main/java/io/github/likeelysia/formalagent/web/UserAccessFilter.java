@@ -5,26 +5,16 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Set;
+import java.util.Locale;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * USER 采用显式允许清单：只有 B 阶段已经完成 owner 校验的 API 才放行，未知新 API 默认拒绝。
- * 管理员不受影响；图片 multipart、上传、背词、公共教材管理仍拒绝。
- */
+/** USER 显式允许矩阵：路径 + 方法 + Content-Type；未知 API 默认拒绝。 */
 @Component
 public class UserAccessFilter extends OncePerRequestFilter {
-
-    private static final Set<String> ALLOWED_API = Set.of(
-            "/api/auth/me", "/api/auth/csrf", "/api/health",
-            "/api/conversations", "/api/agent", "/api/agent/stream",
-            "/api/memory", "/api/notes",
-            "/api/knowledge", "/api/knowledge/count", "/api/knowledge/page",
-            "/api/knowledge/item");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -36,9 +26,11 @@ public class UserAccessFilter extends OncePerRequestFilter {
             return;
         }
         String path = request.getRequestURI();
-        boolean api = path.startsWith("/api/");
-        boolean allowed = !api || allowedApi(request, path);
-        if (!allowed) {
+        if (path.equals("/vocab.html")) {
+            response.sendRedirect("/notes.html");
+            return;
+        }
+        if (path.startsWith("/api/") && !allowed(request, path)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write(
@@ -48,16 +40,44 @@ public class UserAccessFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    private static boolean allowedApi(HttpServletRequest request, String path) {
-        if (path.equals("/api/agent")) {
-            String ct = request.getContentType();
-            return !"POST".equalsIgnoreCase(request.getMethod()) || (ct != null
-                    && ct.toLowerCase().startsWith("application/json"));
+    private static boolean allowed(HttpServletRequest r, String path) {
+        String m = r.getMethod().toUpperCase(Locale.ROOT);
+        if (path.equals("/api/auth/me") || path.equals("/api/auth/csrf")
+                || path.equals("/api/health")) return "GET".equals(m);
+        if (path.equals("/api/knowledge") || path.equals("/api/knowledge/count")
+                || path.equals("/api/knowledge/page") || path.equals("/api/knowledge/item")) {
+            return "GET".equals(m);
         }
-        if (ALLOWED_API.contains(path)) return true;
-        for (String base : Set.of("/api/conversations", "/api/memory", "/api/notes")) {
-            if (path.startsWith(base + "/")) return true;
+        if (path.equals("/api/conversations")) return "GET".equals(m) || "POST".equals(m);
+        if (path.matches("/api/conversations/[A-Za-z0-9_-]{1,40}")) {
+            return "GET".equals(m) || "PATCH".equals(m) || "DELETE".equals(m);
+        }
+        if (path.matches("/api/conversations/[A-Za-z0-9_-]{1,40}/memory-scope")) {
+            return "PUT".equals(m);
+        }
+        if (path.equals("/api/agent") || path.equals("/api/agent/stream")) {
+            return "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.equals("/api/memory")) return "GET".equals(m) || "POST".equals(m) || "DELETE".equals(m);
+        if (path.equals("/api/memory/core")) return "GET".equals(m) || "PUT".equals(m);
+        if (path.equals("/api/memory/conflicts") || path.equals("/api/memory/export")) {
+            return "GET".equals(m);
+        }
+        if (path.matches("/api/memory/conflicts/[A-Za-z0-9_-]{1,40}")) return "DELETE".equals(m);
+        if (path.matches("/api/memory/[A-Za-z0-9_-]{1,40}")) return "PATCH".equals(m) || "DELETE".equals(m);
+        if (path.equals("/api/notes")) return "GET".equals(m) || "POST".equals(m);
+        if (path.equals("/api/notes/manual")) return "POST".equals(m);
+        if (path.equals("/api/notes/export")) return "GET".equals(m);
+        if (path.matches("/api/notes/[A-Za-z0-9_-]{1,40}")) {
+            return "GET".equals(m) || "PATCH".equals(m) || "DELETE".equals(m);
         }
         return false;
+    }
+
+    private static boolean isJson(String contentType) {
+        if (contentType == null) return false;
+        int semi = contentType.indexOf(';');
+        String type = (semi >= 0 ? contentType.substring(0, semi) : contentType).trim();
+        return "application/json".equalsIgnoreCase(type);
     }
 }
