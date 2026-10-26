@@ -37,6 +37,7 @@ public class NoteStore {
 
     private static final String DEFAULT_DIR = "data/notes";
     private static final String FILE_NAME = "notes.json";
+    private static final String OWNER_PATTERN = "[A-Za-z0-9_-]{1,40}";
 
     /** 整本笔记的文件内容。 */
     record NoteFile(List<Note> notes) {
@@ -57,18 +58,26 @@ public class NoteStore {
         this.file = file;
     }
 
-    /** 全部笔记(新的在前)。 */
     public List<Note> list() {
+        return list(null);
+    }
+
+    /** 只列这个 owner 的笔记；owner 由服务端认证身份传入，不能来自请求体。 */
+    public List<Note> list(String ownerId) {
         synchronized (lock) {
-            List<Note> notes = new ArrayList<>(read());
+            List<Note> notes = new ArrayList<>(read(fileFor(ownerId)));
             notes.sort((a, b) -> Long.compare(b.savedAt(), a.savedAt()));
             return List.copyOf(notes);
         }
     }
 
     public Optional<Note> find(String id) {
+        return find(null, id);
+    }
+
+    public Optional<Note> find(String ownerId, String id) {
         synchronized (lock) {
-            return read().stream().filter(n -> n.id().equals(id)).findFirst();
+            return read(fileFor(ownerId)).stream().filter(n -> n.id().equals(id)).findFirst();
         }
     }
 
@@ -78,11 +87,16 @@ public class NoteStore {
      * @return 真正新加进去的那些(被去重挡掉的不在里头)
      */
     public List<Note> addAll(List<Note> notes) {
+        return addAll(null, notes);
+    }
+
+    public List<Note> addAll(String ownerId, List<Note> notes) {
         if (notes == null || notes.isEmpty()) {
             return List.of();
         }
         synchronized (lock) {
-            List<Note> current = new ArrayList<>(read());
+            Path target = fileFor(ownerId);
+            List<Note> current = new ArrayList<>(read(target));
             Set<String> keys = new LinkedHashSet<>();
             for (Note n : current) {
                 keys.add(n.dedupKey());
@@ -95,43 +109,111 @@ public class NoteStore {
                 }
             }
             if (!added.isEmpty()) {
-                write(List.copyOf(current));
+                write(target, List.copyOf(current));
             }
             return List.copyOf(added);
         }
     }
 
     public boolean delete(String id) {
+        return delete(null, id);
+    }
+
+    public boolean delete(String ownerId, String id) {
         synchronized (lock) {
-            List<Note> current = new ArrayList<>(read());
+            Path target = fileFor(ownerId);
+            List<Note> current = new ArrayList<>(read(target));
             boolean removed = current.removeIf(n -> n.id().equals(id));
             if (removed) {
-                write(List.copyOf(current));
+                write(target, List.copyOf(current));
             }
             return removed;
         }
     }
 
+    /** 编辑一条笔记的问题/回答正文；owner 不符时返回 empty，不泄露他人笔记是否存在。 */
+    public Optional<Note> update(String ownerId, String id, String question, List<Note.Answer> answers) {
+        synchronized (lock) {
+            Path target = fileFor(ownerId);
+            List<Note> current = new ArrayList<>(read(target));
+            for (int i = 0; i < current.size(); i++) {
+                Note n = current.get(i);
+                if (n.id().equals(id)) {
+                    Note edited = new Note(n.id(), n.conversationId(),
+                            question == null || question.isBlank() ? n.question() : question.strip(),
+                            n.questionAt(), answers == null ? n.answers() : answers, n.savedAt());
+                    current.set(i, edited);
+                    write(target, List.copyOf(current));
+                    return Optional.of(edited);
+                }
+            }
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 把旧的全局 notes.json 只迁给指定的管理员 owner。目标已存在则不动，保证幂等，
+     * 也不会把管理员后来删掉的旧笔记重复加回来。
+     */
+    public boolean migrateLegacy(String ownerId) {
+        synchronized (lock) {
+            if (ownerId == null || ownerId.isBlank() || !Files.exists(file)) {
+                return false;
+            }
+            Path target = fileFor(ownerId);
+            if (Files.exists(target)) {
+                return false;
+            }
+            List<Note> legacy = read(file);
+            if (legacy.isEmpty()) {
+                return false;
+            }
+            write(target, legacy);
+            log.info("旧笔记本迁移到 owner {}:{} 条(原文件保留)", ownerId, legacy.size());
+            return true;
+        }
+    }
+
     // ==================== 内部 ====================
 
+    private Path fileFor(String ownerId) {
+        if (ownerId == null || ownerId.isBlank()) {
+            return file;
+        }
+        if (!ownerId.matches(OWNER_PATTERN)) {
+            throw new AgentException("非法 ownerId");
+        }
+        Path parent = file.toAbsolutePath().getParent();
+        if (parent == null) throw new AgentException("笔记目录不可用");
+        return parent.resolve(ownerId).resolve(file.getFileName());
+    }
+
     private List<Note> read() {
-        if (!Files.exists(file)) {
+        return read(file);
+    }
+
+    private List<Note> read(Path target) {
+        if (!Files.exists(target)) {
             return List.of();
         }
         try {
-            NoteFile parsed = mapper.readValue(Files.readString(file), NoteFile.class);
+            NoteFile parsed = mapper.readValue(Files.readString(target), NoteFile.class);
             return parsed.notes() == null ? List.of() : parsed.notes();
         } catch (IOException e) {
-            log.warn("笔记本读不出来({}):{}", file.getFileName(), e.getMessage());
+            log.warn("笔记本读不出来({}):{}", target.getFileName(), e.getMessage());
             return List.of();                    // 坏文件不该让整个页面打不开
         }
     }
 
     private void write(List<Note> notes) {
+        write(file, notes);
+    }
+
+    private void write(Path target, List<Note> notes) {
         try {
-            Files.createDirectories(file.toAbsolutePath().getParent());
+            Files.createDirectories(target.toAbsolutePath().getParent());
             mapper.writerWithDefaultPrettyPrinter()
-                    .writeValue(file.toFile(), new NoteFile(notes));
+                    .writeValue(target.toFile(), new NoteFile(notes));
         } catch (IOException e) {
             throw new AgentException("笔记本保存失败:" + e.getMessage());
         }

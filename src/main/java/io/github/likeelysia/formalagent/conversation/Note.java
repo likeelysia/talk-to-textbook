@@ -22,6 +22,11 @@ public record Note(String id, String conversationId, String question, long quest
         answers = answers == null ? List.of() : List.copyOf(answers);
     }
 
+    /** 手工笔记没有来源会话；旧调用方仍可传会话 id。 */
+    public Note(String id, String question, List<Answer> answers, long savedAt) {
+        this(id, "", question, savedAt, answers, savedAt);
+    }
+
     /** 笔记里的一条回答 —— 带时间和工具轨迹,回看时能还原"它当时查了什么"。 */
     public record Answer(String text, long at, List<String> trace) {
 

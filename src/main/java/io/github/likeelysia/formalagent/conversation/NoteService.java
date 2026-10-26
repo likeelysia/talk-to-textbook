@@ -120,12 +120,49 @@ public class NoteService {
         return store.list();
     }
 
+    public List<Note> list(String ownerId) {
+        return store.list(ownerId);
+    }
+
     public Note get(String id) {
         return store.find(id).orElseThrow(() -> new AgentException("笔记不存在:" + id));
     }
 
+    public Note get(String ownerId, String id) {
+        return store.find(ownerId, id).orElseThrow(() -> new AgentException("笔记不存在:" + id));
+    }
+
     public boolean delete(String id) {
         return store.delete(id);
+    }
+
+    public boolean delete(String ownerId, String id) {
+        return store.delete(ownerId, id);
+    }
+
+    /** A/B 首轮使用的受控手工笔记：不引用尚未隔离的会话。 */
+    public Note saveManual(String ownerId, String question, List<String> answers) {
+        String q = question == null ? "" : question.strip();
+        if (q.isEmpty()) throw new AgentException("问题不能为空");
+        List<String> texts = answers == null ? List.of() : answers.stream()
+                .filter(a -> a != null && !a.isBlank()).toList();
+        if (texts.isEmpty()) throw new AgentException("至少需要一条回答");
+        List<Note.Answer> as = texts.stream()
+                .map(t -> new Note.Answer(t.strip(), System.currentTimeMillis(), null))
+                .toList();
+        Note note = new Note(newId(), "", q, System.currentTimeMillis(), as,
+                System.currentTimeMillis());
+        List<Note> saved = store.addAll(ownerId, List.of(note));
+        return saved.stream().findFirst().orElse(note);
+    }
+
+    public Note edit(String ownerId, String id, String question, List<String> answers) {
+        List<Note.Answer> as = answers == null ? null : answers.stream()
+                .filter(a -> a != null && !a.isBlank())
+                .map(t -> new Note.Answer(t.strip(), System.currentTimeMillis(), null))
+                .toList();
+        return store.update(ownerId, id, question, as)
+                .orElseThrow(() -> new AgentException("笔记不存在:" + id));
     }
 
     // ==================== 挑"相关回答" ====================

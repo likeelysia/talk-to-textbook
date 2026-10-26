@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.web;
 
+import io.github.likeelysia.formalagent.account.AccountService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -14,11 +15,24 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/auth")
 public class AuthController {
 
+    private final AccountService accounts;
+
+    public AuthController(AccountService accounts) {
+        this.accounts = accounts;
+    }
+
     @GetMapping("/me")
     public Map<String, Object> me(Authentication authentication) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("authenticated", authentication != null && authentication.isAuthenticated());
         body.put("username", authentication == null ? "" : authentication.getName());
+        if (authentication != null && authentication.isAuthenticated()
+                && !"anonymousUser".equals(authentication.getName())) {
+            accounts.findByUsername(authentication.getName()).ifPresent(a -> {
+                body.put("userId", a.userId());
+                body.put("role", a.role());
+            });
+        }
         return body;
     }
 

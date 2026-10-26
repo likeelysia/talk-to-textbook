@@ -3,17 +3,15 @@ package io.github.likeelysia.formalagent.config;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -21,7 +19,9 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import io.github.likeelysia.formalagent.web.AccountStatusFilter;
 import io.github.likeelysia.formalagent.web.CsrfCookieFilter;
+import io.github.likeelysia.formalagent.web.UserAccessFilter;
 
 /**
  * 单用户受控访问:登录后才能看学习数据、调模型;首页/登录页/健康检查公开。
@@ -49,29 +49,30 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder(12);
     }
 
+    /**
+     * 这两个过滤器只挂在 Spring Security 链上；关掉 Servlet 容器的自动注册，
+     * 否则同一个请求会被执行两次。
+     */
     @Bean
-    public UserDetailsService users(
-            @Value("${fa.auth.username:pengge}") String username,
-            @Value("${fa.auth.password:}") String password,
-            @Value("${fa.auth.password-hash:}") String passwordHash,
-            PasswordEncoder encoder) {
-        String hash = passwordHash == null ? "" : passwordHash.strip();
-        if (hash.isBlank() && password != null && !password.isBlank()) {
-            hash = encoder.encode(password);
-        }
-        if (hash.isBlank()) {
-            throw new IllegalStateException(
-                    "未配置登录凭据:请设置 FA_AUTH_PASSWORD_HASH(推荐)或 FA_AUTH_PASSWORD,再启动");
-        }
-        return new InMemoryUserDetailsManager(
-                User.withUsername(username == null || username.isBlank() ? "pengge" : username.strip())
-                        .password(hash)
-                        .roles("USER")
-                        .build());
+    public FilterRegistrationBean<AccountStatusFilter> accountStatusFilterRegistration(
+            AccountStatusFilter filter) {
+        FilterRegistrationBean<AccountStatusFilter> bean = new FilterRegistrationBean<>(filter);
+        bean.setEnabled(false);
+        return bean;
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public FilterRegistrationBean<UserAccessFilter> userAccessFilterRegistration(
+            UserAccessFilter filter) {
+        FilterRegistrationBean<UserAccessFilter> bean = new FilterRegistrationBean<>(filter);
+        bean.setEnabled(false);
+        return bean;
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                   AccountStatusFilter accountStatusFilter,
+                                                   UserAccessFilter userAccessFilter) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
                         // 首页/登录/静态欢迎资源/健康检查:公开
@@ -110,6 +111,8 @@ public class SecurityConfig {
                                 },
                                 request -> request.getRequestURI().startsWith("/api/")))
                 .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
+        http.addFilterAfter(accountStatusFilter, AnonymousAuthenticationFilter.class);
+        http.addFilterAfter(userAccessFilter, AccountStatusFilter.class);
         return http.build();
     }
 

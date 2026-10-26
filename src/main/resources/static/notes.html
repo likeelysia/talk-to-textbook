@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的笔记 · Lamplit</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { max-width: 900px; margin: 0 auto; padding: 24px; font-family: system-ui, sans-serif; }
+    .bar { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .card { border:1px solid #ddd; border-radius:12px; padding:16px; margin:12px 0; }
+    textarea, input { width:100%; box-sizing:border-box; padding:10px; margin:6px 0; }
+    button { padding:8px 14px; cursor:pointer; }
+    .muted { color:#777; font-size:13px; }
+    .error { color:#b00020; }
+  </style>
+</head>
+<body>
+<div class="bar">
+  <h1>我的笔记</h1>
+  <div>
+    <span id="who" class="muted"></span>
+    <button id="logout">退出</button>
+  </div>
+</div>
+<p class="muted">当前是账号+笔记隔离测试版；会话、记忆、生词、上传等入口尚未开放给测试账号。</p>
+
+<div class="card">
+  <h2>新建笔记</h2>
+  <input id="question" placeholder="问题">
+  <textarea id="answer" rows="4" placeholder="回答"></textarea>
+  <button id="save">保存笔记</button>
+  <div id="msg" class="error"></div>
+</div>
+
+<h2>我的笔记列表</h2>
+<div id="list"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const csrf = () => decodeURIComponent((document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/) || [])[1] || '');
+const call = async (url, options = {}) => {
+  const headers = Object.assign({'Accept':'application/json'}, options.headers || {});
+  if (options.body) headers['Content-Type'] = 'application/json; charset=UTF-8';
+  if (options.method && options.method !== 'GET') headers['X-XSRF-TOKEN'] = csrf();
+  const r = await fetch(url, Object.assign({}, options, {headers}));
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = {error:text}; }
+  if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+  return data;
+};
+const render = (notes) => {
+  $('list').innerHTML = '';
+  if (!notes.length) { $('list').textContent = '还没有笔记。'; return; }
+  for (const n of notes) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const q = document.createElement('h3'); q.textContent = n.question;
+    const a = document.createElement('p'); a.textContent = (n.answers && n.answers[0] && n.answers[0].text) || '';
+    const meta = document.createElement('div'); meta.className = 'muted';
+    meta.textContent = '保存时间：' + new Date(n.savedAt).toLocaleString();
+    const del = document.createElement('button'); del.textContent = '删除';
+    del.onclick = async () => {
+      if (!confirm('删除这条笔记？')) return;
+      try { await call('/api/notes/' + encodeURIComponent(n.id), {method:'DELETE'}); await load(); }
+      catch (e) { $('msg').textContent = e.message; }
+    };
+    const edit = document.createElement('button'); edit.textContent = '编辑';
+    edit.onclick = async () => {
+      const nq = prompt('问题', n.question); if (nq === null) return;
+      const na = prompt('回答', (n.answers && n.answers[0] && n.answers[0].text) || ''); if (na === null) return;
+      try { await call('/api/notes/' + encodeURIComponent(n.id), {method:'PATCH', body: JSON.stringify({question:nq, answers:[na]})}); await load(); }
+      catch (e) { $('msg').textContent = e.message; }
+    };
+    card.append(q, a, meta, edit, del);
+    $('list').appendChild(card);
+  }
+};
+const load = async () => {
+  const data = await call('/api/notes');
+  render(data.notes || []);
+};
+(async () => {
+  try {
+    const me = await call('/api/auth/me');
+    if (!me.authenticated) { location.href = '/login.html'; return; }
+    $('who').textContent = me.username + (me.role ? ' · ' + me.role : '');
+    await load();
+  } catch (e) { $('msg').textContent = e.message; }
+})();
+$('save').onclick = async () => {
+  $('msg').textContent = '';
+  const question = $('question').value.trim();
+  const answer = $('answer').value.trim();
+  if (!question || !answer) { $('msg').textContent = '问题和回答都不能为空'; return; }
+  try {
+    await call('/api/notes/manual', {method:'POST', body: JSON.stringify({question, answers:[answer]})});
+    $('question').value = ''; $('answer').value = ''; await load();
+  } catch (e) { $('msg').textContent = e.message; }
+};
+$('logout').onclick = async () => {
+  try {
+    await fetch('/logout', {method:'POST', headers:{'X-XSRF-TOKEN':csrf()}});
+  } finally { location.href = '/'; }
+};
+</script>
+</body>
+</html>

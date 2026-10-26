@@ -68,6 +68,36 @@ class NoteStoreTest {
     }
 
     @Test
+    @DisplayName("owner 隔离:不同账号各读各的,按 ID 也读不到别人的")
+    void ownerIsolation(@TempDir Path tmp) {
+        NoteStore store = new NoteStore(MAPPER, tmp.resolve("notes.json"));
+        store.addAll("alice", List.of(note("a1", "", "A 的问题", "A 的回答")));
+        store.addAll("bob", List.of(note("b1", "", "B 的问题", "B 的回答")));
+
+        assertThat(store.list("alice")).extracting(Note::id).containsExactly("a1");
+        assertThat(store.list("bob")).extracting(Note::id).containsExactly("b1");
+        assertThat(store.find("alice", "b1")).isEmpty();
+        assertThat(store.find("bob", "a1")).isEmpty();
+        assertThat(store.delete("alice", "b1")).isFalse();
+        assertThat(store.list("bob")).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("旧笔记本只迁给指定 owner,重复执行不重复")
+    void migratesLegacyOnlyToAdmin(@TempDir Path tmp) throws Exception {
+        Path legacy = tmp.resolve("notes.json");
+        NoteStore store = new NoteStore(MAPPER, legacy);
+        store.addAll(List.of(note("old", "c1", "旧问题", "旧回答")));
+
+        assertThat(store.migrateLegacy("admin")).isTrue();
+        assertThat(store.list("admin")).extracting(Note::id).containsExactly("old");
+        assertThat(store.list("alice")).isEmpty();
+        assertThat(store.migrateLegacy("admin")).isFalse();
+        assertThat(store.list("admin")).hasSize(1);
+        assertThat(Files.exists(legacy)).isTrue();
+    }
+
+    @Test
     @DisplayName("坏文件不该让笔记本打不开")
     void toleratesBrokenFile(@TempDir Path tmp) throws Exception {
         Path file = tmp.resolve("notes.json");
