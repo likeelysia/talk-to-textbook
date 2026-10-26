@@ -83,7 +83,10 @@ public class LegacyUserDataMigration {
                 String name = p.getFileName().toString();
                 Path dest = target.resolve(source.relativize(p));
                 if (name.equals("index.json")) copyFile(p, dest, Type.INDEX);
-                else if (name.equals("owners.json")) copyFile(p, dest, Type.OWNERS);
+                else if (name.equals("owners.json")) {
+                    Path ownersDest = target.getParent().resolve("legacy-owners.json");
+                    copyFile(p, ownersDest, Type.OWNERS);
+                }
                 else if (name.endsWith(".json")) copyFile(p, dest, Type.CONVERSATION);
             }
         }
@@ -124,8 +127,12 @@ public class LegacyUserDataMigration {
     }
 
     private void validate(Path p, Type type) throws IOException {
+        if (type == Type.CORE) {
+            String text = Files.readString(p);
+            if (text == null) throw new IOException("core 不可读:" + p);
+            return;
+        }
         JsonNode node = mapper.readTree(Files.readString(p));
-        if (type == Type.CORE) return;
         if (node == null || !node.isObject()) {
             throw new IOException("迁移文件结构不是对象(" + type + "):" + p);
         }
