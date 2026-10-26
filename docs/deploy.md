@@ -49,6 +49,15 @@
 - **服务器已于 2026-10-26 切换到该版本**：`/opt/lamplit/releases/0709e5e`，健康 200、7287 条、`missingVectors=0`、服务内存约 327–335 MB；旧版 `2eb600a` 保留可回滚。
 - 现场结果：[Lamplit服务器升级现场结果-2026-10-26.md](C:/Users/29458/Desktop/GPT的指导建议/Lamplit服务器升级现场结果-2026-10-26.md)。生产项目口令未提供；隔离副本只完成既有数据读取和一次受限问答，**新增写入未验**，不能写成完整功能验收通过。
 
+### 1.4 外部 Embedding 适配候选（2026-10-26，未上线）
+
+- 提交：`84a2a95 feat(embedding): 适配外部云 embedding 批量与响应校验`
+- JAR：`dist/talk-to-textbook-0.1.0-84a2a95.jar`
+- SHA-256：`C562BEFC1ED95D2E3B4FD90A2B48D391BC414C5BB1321151E06697A46D30AFBE`
+- 支持 `FA_EMBEDDING_BATCH_SIZE`、`FA_EMBEDDING_PATH`、`FA_EMBEDDING_DIMENSIONS`、index 校验、429/5xx 有上限重试和 usage 记录。
+- 本地完整 12925 条 + 旧 bge-m3 sidecar、`-Xmx768m`：启动峰值 456.8 MB、稳定 386.6 MB；**这不是 v4 查询通过**。
+- 当前没有外部 embedding Key；服务器仍为 `0709e5e`、7287 条、embedding DOWN，未切换。详见 `C:/Users/29458/Desktop/GPT的指导建议/Lamplit完整12925条知识库与外部Embedding验收报告-2026-10-26.md`。
+
 ## 2. 服务器建议
 
 | 项目 | 最低 | 建议 |
