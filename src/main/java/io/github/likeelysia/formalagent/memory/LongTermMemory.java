@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -312,13 +313,18 @@ public class LongTermMemory {
         if (!inflight.add(key)) {
             return;                              // 同一段消息已经在排队,不重复烧模型
         }
-        executor.execute(() -> {
-            try {
-                extract(conversation, pending, scope, generation, from, to);
-            } finally {
-                inflight.remove(key);
-            }
-        });
+        try {
+            executor.execute(() -> {
+                try {
+                    extract(conversation, pending, scope, generation, from, to);
+                } finally {
+                    inflight.remove(key);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            inflight.remove(key);
+            log.warn("记忆提炼队列已满,本次未排队,不推进水位:{}", key);
+        }
     }
 
     /**
@@ -867,7 +873,8 @@ public class LongTermMemory {
         }
         List<String> ids = missing.stream().map(MemoryEntry::id).toList();
         List<String> texts = missing.stream().map(MemoryEntry::text).toList();
-        executor.execute(() -> {
+        try {
+            executor.execute(() -> {
             try {
                 float[][] vectors = tryEmbedAll(texts);
                 boolean any = false;
@@ -899,7 +906,11 @@ public class LongTermMemory {
             } finally {
                 backfillScheduled.remove(scopeId);
             }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            backfillScheduled.remove(scopeId);
+            log.warn("记忆补向量队列已满,本次未排队:{}", scopeId);
+        }
     }
 
     // ==================== 小工具 ====================

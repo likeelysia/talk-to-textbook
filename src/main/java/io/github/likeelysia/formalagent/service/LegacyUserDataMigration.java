@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.account.AccountService;
 import io.github.likeelysia.formalagent.config.AppConfig;
 import io.github.likeelysia.formalagent.exception.AgentException;
@@ -26,10 +27,12 @@ public class LegacyUserDataMigration {
 
     private final AccountService accounts;
     private final AppConfig config;
+    private final ObjectMapper mapper;
 
-    public LegacyUserDataMigration(AccountService accounts, AppConfig config) {
+    public LegacyUserDataMigration(AccountService accounts, AppConfig config, ObjectMapper mapper) {
         this.accounts = accounts;
         this.config = config;
+        this.mapper = mapper;
     }
 
     @PostConstruct
@@ -37,8 +40,7 @@ public class LegacyUserDataMigration {
         String admin = accounts.adminUserId();
         Path userRoot = Path.of(config.conversation().dir()).resolve("users").resolve(admin);
         Path conversationTarget = userRoot.resolve("conversations");
-        Path memoryTarget = Path.of(config.memory().longTerm().dir())
-                .resolve("users").resolve(admin).resolve("memory");
+        Path memoryTarget = userRoot.resolve("memory");
         Path marker = userRoot.resolve(".legacy-userdata-v1");
 
         if (Files.exists(marker)) return;
@@ -57,7 +59,7 @@ public class LegacyUserDataMigration {
     }
 
     /** 只复制源目录第一层文件/子目录内容；跳过 users 子树，避免把目标复制回自己。 */
-    private static void copyMissing(Path source, Path target, Path usersSubtree) throws IOException {
+    private void copyMissing(Path source, Path target, Path usersSubtree) throws IOException {
         if (!Files.isDirectory(source)) return;
         try (Stream<Path> walk = Files.walk(source)) {
             for (Path p : walk.toList()) {
@@ -66,11 +68,26 @@ public class LegacyUserDataMigration {
                 Path dest = target.resolve(rel);
                 if (Files.isDirectory(p)) {
                     Files.createDirectories(dest);
+                } else if (p.getFileName().toString().endsWith(".json")) {
+                    validateJson(p);
+                    if (Files.exists(dest)) validateJson(dest);
+                    else {
+                        Files.createDirectories(dest.getParent());
+                        Files.copy(p, dest, StandardCopyOption.COPY_ATTRIBUTES);
+                    }
                 } else if (!Files.exists(dest)) {
                     Files.createDirectories(dest.getParent());
                     Files.copy(p, dest, StandardCopyOption.COPY_ATTRIBUTES);
                 }
             }
+        }
+    }
+
+    private void validateJson(Path p) throws IOException {
+        try {
+            mapper.readTree(Files.readString(p));
+        } catch (IOException e) {
+            throw new IOException("迁移源/目标 JSON 损坏:" + p + " -> " + e.getMessage(), e);
         }
     }
 }
