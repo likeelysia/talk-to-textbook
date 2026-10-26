@@ -19,25 +19,24 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class UserAccessFilter extends OncePerRequestFilter {
 
     private static final List<String> BLOCKED_PREFIXES = List.of(
-            "/api/conversations",
-            "/api/agent",
-            "/api/memory",
             "/api/vocab",
             "/api/upload",
             "/api/ingest",
             "/api/knowledge/source",
             "/api/knowledge/vectors",
             "/api/admin",
-            "/study.html",
             "/vocab.html");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean imageUpload = request.getRequestURI().equals("/api/agent")
+                && request.getContentType() != null
+                && request.getContentType().toLowerCase().startsWith("multipart/");
         if (auth != null && auth.isAuthenticated()
                 && auth.getAuthorities().contains(new SimpleGrantedAuthority("ROLE_USER"))
-                && blocked(request.getRequestURI())) {
+                && (blocked(request.getRequestURI()) || imageUpload)) {
             if (request.getRequestURI().endsWith(".html")) {
                 response.sendRedirect("/notes.html");
                 return;
