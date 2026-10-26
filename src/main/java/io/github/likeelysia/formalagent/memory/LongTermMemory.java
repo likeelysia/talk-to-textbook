@@ -405,19 +405,8 @@ public class LongTermMemory {
             }
 
             String batchKey = conversation.id() + ":" + from + ":" + to + ":" + generationAtSubmit;
-            StoreOutcome outcome;
-            if (commitLock == null) {
-                outcome = storeMemories(scopeAtSubmit, result.candidates(),
-                        conversation.id(), generationAtSubmit, batchKey);
-            } else {
-                commitLock.lock();
-                try {
-                    outcome = storeMemories(scopeAtSubmit, result.candidates(),
-                            conversation.id(), generationAtSubmit, batchKey);
-                } finally {
-                    commitLock.unlock();
-                }
-            }
+            StoreOutcome outcome = storeMemories(scopeAtSubmit, result.candidates(),
+                    conversation.id(), generationAtSubmit, batchKey);
             if (outcome.stale()) {
                 // 清空/删除已经发生:旧消息视为"已放弃",推进水位防止下次重新扫描
                 log.info("会话 {} 的提炼结果因记忆已被清空/删除而作废,水位照推", conversation.id());
@@ -497,6 +486,8 @@ public class LongTermMemory {
         }
         Map<Integer, MemoryReconciler.Decision> decisions = reconciler.decide(candidates, neighbors);
 
+        if (commitLock != null) commitLock.lock();
+        try {
         long[] counts = new long[3];       // 0=新增 1=覆盖 2=删除
         List<String> conflictTexts = new ArrayList<>();
         MemoryStore.BatchCommit commit = store.updateBatch(scopeId, expectedGeneration, batchKey, entries -> {
@@ -539,6 +530,9 @@ public class LongTermMemory {
             }
         }
         return new StoreOutcome(counts[0], counts[1], counts[2], commit.stale(), commit.duplicate());
+        } finally {
+            if (commitLock != null) commitLock.unlock();
+        }
     }
 
     record StoreOutcome(long added, long updated, long deleted, boolean stale, boolean duplicate) {
