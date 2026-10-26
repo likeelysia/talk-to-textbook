@@ -56,7 +56,7 @@
 - SHA-256：`C562BEFC1ED95D2E3B4FD90A2B48D391BC414C5BB1321151E06697A46D30AFBE`
 - 支持 `FA_EMBEDDING_BATCH_SIZE`、`FA_EMBEDDING_PATH`、`FA_EMBEDDING_DIMENSIONS`、index 校验、429/5xx 有上限重试和 usage 记录。
 - 本地完整 12925 条 + 旧 bge-m3 sidecar、`-Xmx768m`：启动峰值 456.8 MB、稳定 386.6 MB；**这不是 v4 查询通过**。
-- 当前没有外部 embedding Key；服务器仍为 `0709e5e`、7287 条、embedding DOWN，未切换。详见 `C:/Users/29458/Desktop/GPT的指导建议/Lamplit完整12925条知识库与外部Embedding验收报告-2026-10-26.md`。
+- **2026-10-26 已配置百炼 Key 并实测**：`text-embedding-v4`、1024 维、单条/10 条请求 200；但服务器仍为 `0709e5e`、7287 条，旧 bge-m3 向量因模型指纹变化全部失效（`missingVectors=7287`），当前是关键词降级。未生成 v4 全量向量、未切换知识文件、未跑 60 题。下一步先部署 `84a2a95`，再构建全量。详见 `C:/Users/29458/Desktop/GPT的指导建议/Lamplit完整12925条知识库与外部Embedding验收报告-2026-10-26.md`。
 
 ## 2. 服务器建议
 
