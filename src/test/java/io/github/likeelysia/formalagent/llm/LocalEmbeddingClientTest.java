@@ -1,13 +1,16 @@
 package io.github.likeelysia.formalagent.llm;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import io.github.likeelysia.formalagent.config.AppConfig;
+import io.github.likeelysia.formalagent.exception.AgentException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -59,6 +62,31 @@ class LocalEmbeddingClientTest {
         LocalEmbeddingClient client = new LocalEmbeddingClient(config(url), new ObjectMapper());
 
         assertThat(client.embed("位移")).containsExactly(0.1f, 0.2f, 0.3f);
+    }
+
+    @Test
+    @DisplayName("data[].index 乱序时按 index 还原,不能把向量配错文本")
+    void reordersByIndex() throws Exception {
+        String url = startServer("/v1/embeddings", 200,
+                "{\"data\":[{\"index\":1,\"embedding\":[0.4,0.5]},"
+                        + "{\"index\":0,\"embedding\":[0.1,0.2]}],"
+                        + "\"usage\":{\"prompt_tokens\":2,\"total_tokens\":2}}");
+        LocalEmbeddingClient client = new LocalEmbeddingClient(config(url), new ObjectMapper());
+
+        assertThat(client.embedAll(List.of("第一条", "第二条")))
+                .containsExactly(new float[]{0.1f, 0.2f}, new float[]{0.4f, 0.5f});
+    }
+
+    @Test
+    @DisplayName("空向量/非有限值必须拒绝,不能静默写入坏向量")
+    void rejectsInvalidVector() throws Exception {
+        String url = startServer("/v1/embeddings", 200,
+                "{\"data\":[{\"index\":0,\"embedding\":[]}]}");
+        LocalEmbeddingClient client = new LocalEmbeddingClient(config(url), new ObjectMapper());
+
+        assertThatThrownBy(() -> client.embed("坏向量"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("空向量");
     }
 
     @Test

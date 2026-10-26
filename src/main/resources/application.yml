@@ -167,6 +167,15 @@ fa:
     model: ${FA_EMBEDDING_MODEL:bge-m3}
     # 云端服务需要 Bearer;本地 llama-server 留空
     api-key: ${FA_EMBEDDING_API_KEY:}
+    # OpenAI 兼容端点的路径(默认 /v1/embeddings);百炼请按控制台完整路径配置,避免重复 /v1
+    embeddings-path: ${FA_EMBEDDING_PATH:/v1/embeddings}
+    # HTTP 子批大小;百炼 v4 建议 10 或更小,持久化批次另由补齐接口控制
+    batch-size: ${FA_EMBEDDING_BATCH_SIZE:16}
+    # 期望维度;0=不校验。v4 固定 1024 时建议显式设为 1024
+    dimensions: ${FA_EMBEDDING_DIMENSIONS:0}
+    # 429/5xx 有上限重试;401/403/参数错误不重试
+    max-attempts: ${FA_EMBEDDING_MAX_ATTEMPTS:3}
+    retry-base-ms: ${FA_EMBEDDING_RETRY_BASE_MS:500}
     # 健康探测路径;云端没有 /health 就留空(/api/health 显示 UNKNOWN,不假装 UP)
     health-path: ${FA_EMBEDDING_HEALTH_PATH:/health}
     # 单次 embedding 请求超时(秒)
