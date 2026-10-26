@@ -23,6 +23,7 @@ public class ConversationService {
     private final ConversationStore store;
     private final UserCommitLock commitLock;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ConversationService(ConversationStore store) {
         this(store, null);
     }
