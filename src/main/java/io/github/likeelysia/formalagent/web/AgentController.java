@@ -7,11 +7,13 @@ import io.github.likeelysia.formalagent.llm.VisionClient;
 import io.github.likeelysia.formalagent.prompt.Prompts;
 import io.github.likeelysia.formalagent.service.AssistantService;
 import io.github.likeelysia.formalagent.service.FileStorage;
+import io.github.likeelysia.formalagent.service.UserScopeFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -53,13 +55,32 @@ public class AgentController {
     private final VisionClient vision;
     private final FileStorage fileStorage;
     private final ConversationService conversations;
+    private final UserScopeFactory users;
+    private final CurrentUser currentUser;
 
     public AgentController(AssistantService assistant, VisionClient vision, FileStorage fileStorage,
                            ConversationService conversations) {
+        this(assistant, vision, fileStorage, conversations, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentController(AssistantService assistant, VisionClient vision, FileStorage fileStorage,
+                           ConversationService conversations, UserScopeFactory users,
+                           CurrentUser currentUser) {
         this.assistant = assistant;
         this.vision = vision;
         this.fileStorage = fileStorage;
         this.conversations = conversations;
+        this.users = users;
+        this.currentUser = currentUser;
+    }
+
+    private AssistantService assistant(Authentication auth) {
+        return users == null ? assistant : users.of(currentUser.id(auth)).assistant();
+    }
+
+    private ConversationService conversations(Authentication auth) {
+        return users == null ? conversations : users.of(currentUser.id(auth)).conversations();
     }
 
     /**
@@ -76,11 +97,18 @@ public class AgentController {
 
     /** 纯文本提问。 */
     @PostMapping(value = "/agent", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public AgentResponse agent(@RequestBody AgentRequest req) {
+    public AgentResponse agent(Authentication auth, @RequestBody AgentRequest req) {
         if (req == null || req.question() == null || req.question().isBlank()) {
             throw new AgentException("question 不能为空");
         }
-        return ask(req.conversationId(), req.question());
+        return ask(assistant(auth), req.conversationId(), req.question());
+    }
+
+    public AgentResponse agent(AgentRequest req) {
+        if (req == null || req.question() == null || req.question().isBlank()) {
+            throw new AgentException("question 不能为空");
+        }
+        return ask(assistant, req.conversationId(), req.question());
     }
 
     /**
@@ -137,16 +165,17 @@ public class AgentController {
                 : "请根据下面这些图片的内容回答:\n" + imagesText;
         // 存进历史的用「用户原本那句话 / 几张图」,而不是拼给模型的那一大段 OCR 文本
         String display = hasQuestion ? question : "(" + files.size() + " 张图片)";
-        return ask(id, finalQuestion.trim(), display);
+        return ask(assistant, id, finalQuestion.trim(), display);
     }
 
     /** 文本提问入口:模型看到的问题 = 存进历史的问题。 */
-    private AgentResponse ask(String conversationId, String question) {
-        return ask(conversationId, question, question);
+    private AgentResponse ask(AssistantService assistant, String conversationId, String question) {
+        return ask(assistant, conversationId, question, question);
     }
 
     /** 跑一轮(记忆 + Agent + 落库)→ 组装响应。 */
-    private AgentResponse ask(String conversationId, String modelQuestion, String displayQuestion) {
+    private AgentResponse ask(AssistantService assistant, String conversationId,
+                              String modelQuestion, String displayQuestion) {
         AssistantService.Turn turn = assistant.ask(conversationId, modelQuestion, displayQuestion);
         AgentResult result = turn.result();
         return new AgentResponse(result.answer(), result.steps(), result.trace(), turn.conversationId());
