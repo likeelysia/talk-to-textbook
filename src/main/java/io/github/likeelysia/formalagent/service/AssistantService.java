@@ -64,6 +64,14 @@ public class AssistantService {
         this.coreMemory = coreMemory;
     }
 
+    public AssistantService(AgentService agent, ConversationService conversations,
+                            ShortTermMemory shortTerm, LongTermMemory longTerm, CoreMemoryStore coreMemory,
+                            int maxContextChars, int reserveChars) {
+        this(agent, conversations, shortTerm, longTerm, coreMemory);
+        this.maxContextChars = maxContextChars > 0 ? maxContextChars : 14000;
+        this.reserveChars = reserveChars >= 0 ? reserveChars : 3000;
+    }
+
     /** 测试 / 手工装配用:不带核心档案。 */
     public AssistantService(AgentService agent, ConversationService conversations,
                             ShortTermMemory shortTerm, LongTermMemory longTerm) {

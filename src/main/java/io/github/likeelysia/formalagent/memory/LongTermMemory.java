@@ -138,6 +138,10 @@ public class LongTermMemory {
         this.ownsExecutor = ownsExecutor;
     }
 
+    public void setRecallMinScore(double score) {
+        if (score > 0 && score <= 1) this.recallMinScore = score;
+    }
+
     /** 开关(关掉 = 既不提炼也不召回)。 */
     public boolean enabled() {
         return config == null || config.enabled();

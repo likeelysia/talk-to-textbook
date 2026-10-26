@@ -18,6 +18,7 @@ import io.github.likeelysia.formalagent.memory.ShortTermMemory;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /** One immutable data scope per authenticated owner. */
@@ -34,6 +35,10 @@ public class UserScopeFactory {
     private final EmbeddingClient embedder;
     private final MemoryReconciler reconciler;
     private final MemoryTaskExecutor executor;
+    @Value("${fa.memory.core.max-chars:800}") private int coreMaxChars = 800;
+    @Value("${fa.context.max-chars:14000}") private int contextMaxChars = 14000;
+    @Value("${fa.context.reserve-chars:3000}") private int contextReserveChars = 3000;
+    @Value("${fa.memory.long-term.recall-min-score:0.30}") private double recallMinScore = 0.30;
     private final Map<String, UserData> cache = new ConcurrentHashMap<>();
 
     public UserScopeFactory(ObjectMapper mapper, AppConfig config, AgentService agent,
@@ -70,8 +75,10 @@ public class UserScopeFactory {
         LongTermMemory memory = new LongTermMemory(
                 store, extractor, embedder, conversations, config.memory().longTerm(),
                 executor, reconciler, conflicts);
-        CoreMemoryStore core = new CoreMemoryStore(memoryDir.resolve("core.md").toString(), 800);
-        AssistantService assistant = new AssistantService(agent, conversations, shortTerm, memory, core);
+        memory.setRecallMinScore(recallMinScore);
+        CoreMemoryStore core = new CoreMemoryStore(memoryDir.resolve("core.md").toString(), coreMaxChars);
+        AssistantService assistant = new AssistantService(
+                agent, conversations, shortTerm, memory, core, contextMaxChars, contextReserveChars);
         return new UserData(conversations, memory, core, conflicts, assistant);
     }
 
