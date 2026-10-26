@@ -119,9 +119,20 @@ public class AgentController {
      * @param conversationId 可选,记到哪个会话;不传 = 默认对话
      */
     @PostMapping(value = "/agent", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public AgentResponse agentWithImage(@RequestParam("files") List<MultipartFile> files,
+    public AgentResponse agentWithImage(Authentication auth,
+                                        @RequestParam("files") List<MultipartFile> files,
                                         @RequestParam(value = "question", required = false) String question,
                                         @RequestParam(value = "conversationId", required = false) String conversationId) {
+        return image(assistant(auth), conversations(auth), files, question, conversationId);
+    }
+
+    public AgentResponse agentWithImage(List<MultipartFile> files, String question,
+                                        String conversationId) {
+        return image(assistant, conversations, files, question, conversationId);
+    }
+
+    private AgentResponse image(AssistantService assistant, ConversationService conversations,
+                                List<MultipartFile> files, String question, String conversationId) {
         if (files == null || files.stream().allMatch(MultipartFile::isEmpty)) {
             throw new AgentException("files 不能为空");
         }
