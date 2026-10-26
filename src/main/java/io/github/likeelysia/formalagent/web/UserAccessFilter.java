@@ -25,6 +25,7 @@ public class UserAccessFilter extends OncePerRequestFilter {
             "/api/vocab",
             "/api/upload",
             "/api/ingest",
+            "/api/knowledge/source",
             "/api/knowledge/vectors",
             "/api/admin",
             "/study.html",

@@ -13,12 +13,13 @@ import org.springframework.mock.web.MockHttpServletResponse;
 class AdminKeyInterceptorTest {
 
     @Test
-    @DisplayName("没配密钥 → 直接放行(开发模式)")
-    void openWhenNotConfigured() throws Exception {
+    @DisplayName("没配密钥 → 拒绝(不能静默放行)")
+    void closedWhenNotConfigured() throws Exception {
         AdminKeyInterceptor interceptor = new AdminKeyInterceptor("");
 
-        assertTrue(interceptor.preHandle(new MockHttpServletRequest(),
-                new MockHttpServletResponse(), new Object()));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(new MockHttpServletRequest(), response, new Object()));
+        assertEquals(503, response.getStatus());
     }
 
     @Test

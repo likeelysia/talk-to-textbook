@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.web;
 
+import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeBackfillBusyException;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeItem;
 import io.github.likeelysia.formalagent.knowledge.KnowledgeStore;
@@ -7,6 +8,7 @@ import io.github.likeelysia.formalagent.knowledge.SourceResolver;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,9 +33,16 @@ import org.springframework.web.server.ResponseStatusException;
 public class KnowledgeController {
 
     private final KnowledgeStore store;
+    private final CurrentUser currentUser;
 
     public KnowledgeController(KnowledgeStore store) {
+        this(store, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public KnowledgeController(KnowledgeStore store, CurrentUser currentUser) {
         this.store = store;
+        this.currentUser = currentUser;
     }
 
     @GetMapping("/knowledge")
@@ -101,7 +110,16 @@ public class KnowledgeController {
 
     /** 按来源删除;name 可只写文件名的一部分,但只有唯一命中才动手(见 {@link SourceResolver})。 */
     @DeleteMapping("/knowledge/source")
-    public Map<String, Object> removeSource(@RequestParam("name") String name) {
+    public Map<String, Object> removeSource(Authentication auth, @RequestParam("name") String name) {
+        if (currentUser != null) {
+            try {
+                if (!currentUser.admin(auth)) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "需要管理员");
+                }
+            } catch (AgentException e) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "未登录");
+            }
+        }
         String source = SourceResolver.resolve(store, name);
         int removed = store.removeBySource(source);
 
@@ -110,5 +128,10 @@ public class KnowledgeController {
         body.put("removed", removed);
         body.put("count", store.count());
         return body;
+    }
+
+    /** 仅兼容旧单测/CLI；MVC 请求走带 Authentication 的版本。 */
+    public Map<String, Object> removeSource(String name) {
+        return removeSource(null, name);
     }
 }

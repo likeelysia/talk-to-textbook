@@ -43,13 +43,21 @@ public class NoteService {
     private final ConversationService conversations;
     private final NoteStore store;
     private final EmbeddingClient embedder;
+    private final ConversationOwnershipStore ownership;
+
+    public NoteService(ConversationService conversations, NoteStore store,
+                       @Nullable EmbeddingClient embedder) {
+        this(conversations, store, embedder, null);
+    }
 
     @Autowired
     public NoteService(ConversationService conversations, NoteStore store,
-                       @Nullable EmbeddingClient embedder) {
+                       @Nullable EmbeddingClient embedder,
+                       @Nullable ConversationOwnershipStore ownership) {
         this.conversations = conversations;
         this.store = store;
         this.embedder = embedder;
+        this.ownership = ownership;
     }
 
     /** 存笔记的结果:真存了哪些 + 因为"已经有了"跳过了几条。 */
@@ -63,18 +71,28 @@ public class NoteService {
      * @param indexes        勾选的问题在该会话 {@code messages} 里的下标(只认 role=user 的)
      */
     public SaveResult save(String conversationId, List<Integer> indexes) {
+        return save(null, conversationId, indexes);
+    }
+
+    /**
+     * @param ownerId 认证主体里的稳定 userId；null 只允许旧单测/CLI
+     */
+    public SaveResult save(String ownerId, String conversationId, List<Integer> indexes) {
         if (conversationId == null || conversationId.isBlank()) {
             throw new AgentException("conversationId 不能为空");
         }
         if (indexes == null || indexes.isEmpty()) {
             throw new AgentException("没有勾选任何问题");
         }
+        if (ownership != null && !ownership.canAccess(conversationId, ownerId)) {
+            throw new AgentException("无权访问该会话");
+        }
         Conversation conversation = conversations.get(conversationId);
         List<ChatMessage> messages = conversation.messages();
 
         // "已经有了"的笔记(按 会话+问题 去重),先把重复的挑出去,省得白算向量
         Set<String> existing = new LinkedHashSet<>();
-        for (Note n : store.list()) {
+        for (Note n : store.list(ownerId)) {
             existing.add(n.dedupKey());
         }
 
@@ -112,7 +130,7 @@ public class NoteService {
             candidates.add(note);
         }
 
-        List<Note> saved = store.addAll(candidates);
+        List<Note> saved = store.addAll(ownerId, candidates);
         return new SaveResult(saved, duplicate + (candidates.size() - saved.size()));
     }
 

@@ -56,18 +56,33 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         }
         HttpSession session = request.getSession(false);
         Object stored = session == null ? null : session.getAttribute(SESSION_VERSION);
-        if (!current.enabled() || (stored != null
-                && Long.parseLong(String.valueOf(stored)) != current.sessionVersion())) {
-            if (session != null) session.invalidate();
-            SecurityContextHolder.clearContext();
+        long loginVersion = details.sessionVersion();
+        if (!current.enabled()) {
+            invalidate(session);
             reject(request, response, "账号已停用或会话已失效,请重新登录");
             return;
         }
-        if (stored == null && session != null) {
-            session.setAttribute(SESSION_VERSION, current.sessionVersion());
+        if (stored == null) {
+            // 不在“第一次业务请求”时借用数据库最新版本：必须和登录时的主体快照一致。
+            // 否则登录后未访问业务、随后被重置密码的旧会话会被洗白。
+            if (loginVersion != current.sessionVersion()) {
+                invalidate(session);
+                reject(request, response, "账号已停用或会话已失效,请重新登录");
+                return;
+            }
+            if (session != null) session.setAttribute(SESSION_VERSION, current.sessionVersion());
+        } else if (Long.parseLong(String.valueOf(stored)) != current.sessionVersion()) {
+            invalidate(session);
+            reject(request, response, "账号已停用或会话已失效,请重新登录");
+            return;
         }
         // 让后续 Controller 看到的是当前角色/账号，而不是登录时缓存的旧对象。
         chain.doFilter(request, response);
+    }
+
+    private static void invalidate(HttpSession session) {
+        if (session != null) session.invalidate();
+        SecurityContextHolder.clearContext();
     }
 
     private static void reject(HttpServletRequest request, HttpServletResponse response, String message)

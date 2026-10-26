@@ -152,25 +152,58 @@ public class NoteStore {
     }
 
     /**
-     * 把旧的全局 notes.json 只迁给指定的管理员 owner。目标已存在则不动，保证幂等，
-     * 也不会把管理员后来删掉的旧笔记重复加回来。
+     * 把旧的全局 notes.json 迁给指定管理员 owner。
+     *
+     * <p>目标不存在：整本复制；目标已存在（例如首轮 bug 先建了 admin 目录）：
+     * 只补 id 缺失的旧笔记，不覆盖已编辑内容。迁移完成后写标记，重复启动不会再把
+     * 管理员已删除的旧笔记追加回来。
      */
     public boolean migrateLegacy(String ownerId) {
         synchronized (lock) {
             if (ownerId == null || ownerId.isBlank() || !Files.exists(file)) {
                 return false;
             }
-            Path target = fileFor(ownerId);
-            if (Files.exists(target)) {
+            Path parent = file.toAbsolutePath().getParent();
+            if (parent == null) return false;
+            Path marker = parent.resolve(".legacy-migrated");
+            if (Files.exists(marker)) {
                 return false;
             }
+            Path target = fileFor(ownerId);
             List<Note> legacy = read(file);
             if (legacy.isEmpty()) {
+                markMigrated(marker);
                 return false;
             }
-            write(target, legacy);
-            log.info("旧笔记本迁移到 owner {}:{} 条(原文件保留)", ownerId, legacy.size());
-            return true;
+            boolean changed = false;
+            if (!Files.exists(target)) {
+                write(target, legacy);
+                changed = true;
+            } else {
+                List<Note> current = new ArrayList<>(read(target));
+                Set<String> ids = new LinkedHashSet<>();
+                for (Note n : current) ids.add(n.id());
+                for (Note n : legacy) {
+                    if (ids.add(n.id())) {
+                        current.add(n);
+                        changed = true;
+                    }
+                }
+                if (changed) write(target, List.copyOf(current));
+            }
+            markMigrated(marker);
+            log.info("旧笔记本迁移到 owner {}:legacy={} changed={}(原文件保留)",
+                    ownerId, legacy.size(), changed);
+            return changed;
+        }
+    }
+
+    private static void markMigrated(Path marker) {
+        try {
+            Files.createDirectories(marker.toAbsolutePath().getParent());
+            Files.writeString(marker, "1");
+        } catch (IOException e) {
+            throw new AgentException("旧笔记迁移标记写入失败:" + e.getMessage());
         }
     }
 

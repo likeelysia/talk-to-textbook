@@ -55,18 +55,21 @@ public class NoteController {
     @PostMapping("/notes")
     public Map<String, Object> save(Authentication auth,
                                     @RequestBody(required = false) SaveRequest req) {
-        if (currentUser != null && !currentUser.admin(auth)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "会话尚未完成多账号隔离；测试账号请使用手工笔记接口");
+        try {
+            NoteService.SaveResult result = currentUser == null
+                    ? notes.save(req == null ? null : req.conversationId(),
+                            req == null ? null : req.indexes())
+                    : notes.save(owner(auth),
+                            req == null ? null : req.conversationId(),
+                            req == null ? null : req.indexes());
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("savedCount", result.saved().size());
+            body.put("skippedCount", result.skipped());
+            body.put("saved", result.saved().stream().map(NoteView::of).toList());
+            return body;
+        } catch (AgentException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权保存该会话的笔记");
         }
-        NoteService.SaveResult result = notes.save(
-                req == null ? null : req.conversationId(),
-                req == null ? null : req.indexes());
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("savedCount", result.saved().size());
-        body.put("skippedCount", result.skipped());
-        body.put("saved", result.saved().stream().map(NoteView::of).toList());
-        return body;
     }
 
     /** A/B 首轮受控入口：问题+回答直接生成笔记，不引用尚未隔离的会话。 */

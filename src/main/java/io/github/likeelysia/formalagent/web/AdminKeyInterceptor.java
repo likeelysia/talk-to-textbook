@@ -28,8 +28,8 @@ public class AdminKeyInterceptor implements HandlerInterceptor {
     public AdminKeyInterceptor(@Value("${fa.security.admin-key:}") String adminKey) {
         this.adminKey = adminKey == null ? "" : adminKey.strip();
         if (this.adminKey.isBlank()) {
-            log.warn("未配置 fa.security.admin-key:管理接口(如 /api/ingest)当前【无鉴权】,"
-                    + "任何能连上的人都能调用;上线前请设置环境变量 FA_ADMIN_KEY");
+            log.warn("未配置 fa.security.admin-key:管理接口将拒绝请求;"
+                    + "上线前请设置环境变量 FA_ADMIN_KEY");
         }
     }
 
@@ -37,7 +37,10 @@ public class AdminKeyInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
         if (adminKey.isBlank()) {
-            return true;                                            // 未配置 → 放行(开发模式)
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"error\":\"服务器未配置管理密钥，管理接口已拒绝\"}");
+            return false;
         }
         if (adminKey.equals(request.getHeader("X-Admin-Key"))) {
             return true;
