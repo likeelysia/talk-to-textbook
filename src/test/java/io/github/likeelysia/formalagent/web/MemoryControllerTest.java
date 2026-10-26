@@ -2,7 +2,11 @@ package io.github.likeelysia.formalagent.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +16,8 @@ import io.github.likeelysia.formalagent.memory.LongTermMemory;
 import io.github.likeelysia.formalagent.memory.MemoryConflict;
 import io.github.likeelysia.formalagent.memory.MemoryConflictStore;
 import io.github.likeelysia.formalagent.memory.MemoryEntry;
+import io.github.likeelysia.formalagent.service.UserScopeFactory;
+import io.github.likeelysia.formalagent.service.UserScopeFactory.UserData;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 
 /** 记忆治理接口的"翻译"是否正确:请求怎么读、响应怎么拼、什么不该出去。 */
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +45,12 @@ class MemoryControllerTest {
 
     @Mock
     private MemoryConflictStore conflicts;
+
+    @Mock
+    private UserScopeFactory users;
+
+    @Mock
+    private CurrentUser currentUser;
 
     private MemoryController controller;
 
@@ -176,5 +189,59 @@ class MemoryControllerTest {
 
         assertThat(body.get("dismissed")).isEqualTo(true);
         verify(conflicts).dismiss("c1");
+    }
+
+    @Test
+    @DisplayName("按认证 owner 取作用域:读接口只碰 UserData,不碰 legacy")
+    void ownerScopeCoversReads() {
+        Authentication auth = mock(Authentication.class);
+        LongTermMemory scopedMemory = mock(LongTermMemory.class);
+        CoreMemoryStore scopedCore = mock(CoreMemoryStore.class);
+        MemoryConflictStore scopedConflicts = mock(MemoryConflictStore.class);
+        when(currentUser.id(auth)).thenReturn("u1");
+        when(users.of("u1")).thenReturn(
+                new UserData(null, scopedMemory, scopedCore, scopedConflicts, null));
+        when(scopedMemory.list("c1", false)).thenReturn(List.of(entry()));
+        when(scopedCore.read()).thenReturn("scoped-core");
+        when(scopedConflicts.list()).thenReturn(List.of());
+
+        MemoryController scoped =
+                new MemoryController(memory, coreMemory, conflicts, users, currentUser);
+
+        assertThat(scoped.list(auth, "c1", false).get("count")).isEqualTo(1);
+        assertThat(scoped.core(auth).get("text")).isEqualTo("scoped-core");
+        assertThat(scoped.conflicts(auth).get("count")).isEqualTo(0);
+
+        verify(users, times(3)).of("u1");
+        verify(memory, never()).list(any(), anyBoolean());
+        verify(coreMemory, never()).read();
+        verify(conflicts, never()).list();
+    }
+
+    @Test
+    @DisplayName("按认证 owner 取作用域:写接口也只动这份记忆")
+    void ownerScopeCoversWrites() {
+        Authentication auth = mock(Authentication.class);
+        LongTermMemory scopedMemory = mock(LongTermMemory.class);
+        when(currentUser.id(auth)).thenReturn("u1");
+        when(users.of("u1")).thenReturn(
+                new UserData(null, scopedMemory, coreMemory, conflicts, null));
+        when(scopedMemory.remember(null, "记住")).thenReturn(entry());
+        when(scopedMemory.forget("c1", "m1")).thenReturn(true);
+        when(scopedMemory.list("c1")).thenReturn(List.of());
+
+        MemoryController scoped =
+                new MemoryController(memory, coreMemory, conflicts, users, currentUser);
+
+        scoped.add(auth, new MemoryController.AddRequest(null, "记住"));
+        assertThat(scoped.delete(auth, "m1", "c1").get("removed")).isEqualTo(true);
+        scoped.forgetAll(auth, "c1");
+
+        verify(scopedMemory).remember(null, "记住");
+        verify(scopedMemory).forget("c1", "m1");
+        verify(scopedMemory).forgetAll("c1");
+        verify(memory, never()).remember(any(), any());
+        verify(memory, never()).forget(any(), any());
+        verify(memory, never()).forgetAll(any());
     }
 }
