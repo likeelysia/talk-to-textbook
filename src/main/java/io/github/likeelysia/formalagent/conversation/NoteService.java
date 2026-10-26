@@ -3,6 +3,7 @@ package io.github.likeelysia.formalagent.conversation;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.llm.EmbeddingClient;
 import io.github.likeelysia.formalagent.llm.Vectors;
+import io.github.likeelysia.formalagent.service.UserScopeFactory;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,20 +45,29 @@ public class NoteService {
     private final NoteStore store;
     private final EmbeddingClient embedder;
     private final ConversationOwnershipStore ownership;
+    private final UserScopeFactory users;
 
     public NoteService(ConversationService conversations, NoteStore store,
                        @Nullable EmbeddingClient embedder) {
-        this(conversations, store, embedder, null);
+        this(conversations, store, embedder, null, null);
+    }
+
+    public NoteService(ConversationService conversations, NoteStore store,
+                       @Nullable EmbeddingClient embedder,
+                       @Nullable ConversationOwnershipStore ownership) {
+        this(conversations, store, embedder, ownership, null);
     }
 
     @Autowired
     public NoteService(ConversationService conversations, NoteStore store,
                        @Nullable EmbeddingClient embedder,
-                       @Nullable ConversationOwnershipStore ownership) {
+                       @Nullable ConversationOwnershipStore ownership,
+                       @Nullable UserScopeFactory users) {
         this.conversations = conversations;
         this.store = store;
         this.embedder = embedder;
         this.ownership = ownership;
+        this.users = users;
     }
 
     /** 存笔记的结果:真存了哪些 + 因为"已经有了"跳过了几条。 */
@@ -84,10 +94,12 @@ public class NoteService {
         if (indexes == null || indexes.isEmpty()) {
             throw new AgentException("没有勾选任何问题");
         }
-        if (ownership != null && !ownership.canAccess(conversationId, ownerId)) {
+        ConversationService ownerConversations = users == null ? conversations
+                : users.of(ownerId).conversations();
+        if (users == null && ownership != null && !ownership.canAccess(conversationId, ownerId)) {
             throw new AgentException("无权访问该会话");
         }
-        Conversation conversation = conversations.get(conversationId);
+        Conversation conversation = ownerConversations.get(conversationId);
         List<ChatMessage> messages = conversation.messages();
 
         // "已经有了"的笔记(按 会话+问题 去重),先把重复的挑出去,省得白算向量
