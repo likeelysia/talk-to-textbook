@@ -114,8 +114,17 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !uiModal
 /* ---------------- 会话状态 ---------------- */
 
 /** 当前会话 id:存在 localStorage,刷新页面还停在原来那个框 */
-const CONV_STORAGE_KEY = 'fa.conversationId';
-let currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
+let CONV_STORAGE_KEY = 'fa.conversationId';
+let currentConversationId = null;
+async function initUserStorage() {
+    try {
+        const me = await apiJson('/api/auth/me');
+        const id = me.userId || me.username || 'anon';
+        CONV_STORAGE_KEY = 'fa.conversationId.' + id;
+        currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
+        localStorage.removeItem('fa.conversationId');
+    } catch (_) {}
+}
 let defaultConversationId = 'default';
 
 /* ---- 📝 存笔记(勾选模式)状态 ---- */
@@ -1565,4 +1574,4 @@ document.addEventListener('keydown', (e) => {
 
 ensureLogoutCsrf();
 loadKnowledge();
-initConversations();
+initUserStorage().finally(() => initConversations());
