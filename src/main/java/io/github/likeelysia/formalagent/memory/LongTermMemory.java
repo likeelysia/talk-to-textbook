@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.memory;
 
+import io.github.likeelysia.formalagent.account.UserCommitLock;
 import io.github.likeelysia.formalagent.config.AppConfig;
 import io.github.likeelysia.formalagent.conversation.ChatMessage;
 import io.github.likeelysia.formalagent.conversation.Conversation;
@@ -82,6 +83,7 @@ public class LongTermMemory {
     private final MemoryConflictStore conflicts;
     /** 共享执行器由 Spring 统一关闭；单用户实例不能关闭全应用的池。 */
     private final boolean ownsExecutor;
+    private UserCommitLock commitLock;
 
     /** 每个会话的失败退避:避免服务挂了以后每一轮都立即重试。 */
     private final Map<String, Retry> retries = new ConcurrentHashMap<>();
@@ -136,6 +138,10 @@ public class LongTermMemory {
         this.reconciler = reconciler;
         this.conflicts = conflicts;
         this.ownsExecutor = ownsExecutor;
+    }
+
+    public void setCommitLock(UserCommitLock lock) {
+        this.commitLock = lock;
     }
 
     public void setRecallMinScore(double score) {
@@ -399,8 +405,19 @@ public class LongTermMemory {
             }
 
             String batchKey = conversation.id() + ":" + from + ":" + to + ":" + generationAtSubmit;
-            StoreOutcome outcome = storeMemories(scopeAtSubmit, result.candidates(),
-                    conversation.id(), generationAtSubmit, batchKey);
+            StoreOutcome outcome;
+            if (commitLock == null) {
+                outcome = storeMemories(scopeAtSubmit, result.candidates(),
+                        conversation.id(), generationAtSubmit, batchKey);
+            } else {
+                commitLock.lock();
+                try {
+                    outcome = storeMemories(scopeAtSubmit, result.candidates(),
+                            conversation.id(), generationAtSubmit, batchKey);
+                } finally {
+                    commitLock.unlock();
+                }
+            }
             if (outcome.stale()) {
                 // 清空/删除已经发生:旧消息视为"已放弃",推进水位防止下次重新扫描
                 log.info("会话 {} 的提炼结果因记忆已被清空/删除而作废,水位照推", conversation.id());

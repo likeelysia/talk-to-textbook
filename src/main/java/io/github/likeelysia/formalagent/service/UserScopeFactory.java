@@ -2,6 +2,7 @@ package io.github.likeelysia.formalagent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.agent.AgentService;
+import io.github.likeelysia.formalagent.account.UserCommitLock;
 import io.github.likeelysia.formalagent.config.AppConfig;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.conversation.ConversationStore;
@@ -66,8 +67,9 @@ public class UserScopeFactory {
         Path userRoot = Path.of(config.conversation().dir()).resolve("users").resolve(ownerId);
         Path conversationDir = userRoot.resolve("conversations");
         Path memoryDir = userRoot.resolve("memory");
+        UserCommitLock commitLock = new UserCommitLock();
         ConversationService conversations = new ConversationService(
-                new ConversationStore(mapper, conversationDir));
+                new ConversationStore(mapper, conversationDir), commitLock);
         conversations.ensureDefault();
         MemoryStore store = new MemoryStore(mapper, memoryDir, config.embedding().model());
         MemoryConflictStore conflicts = new MemoryConflictStore(
@@ -75,6 +77,7 @@ public class UserScopeFactory {
         LongTermMemory memory = new LongTermMemory(
                 store, extractor, embedder, conversations, config.memory().longTerm(),
                 executor, reconciler, conflicts);
+        memory.setCommitLock(commitLock);
         memory.setRecallMinScore(recallMinScore);
         CoreMemoryStore core = new CoreMemoryStore(memoryDir.resolve("core.md").toString(), coreMaxChars);
         AssistantService assistant = new AssistantService(

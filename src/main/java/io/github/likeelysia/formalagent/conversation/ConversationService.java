@@ -1,5 +1,6 @@
 package io.github.likeelysia.formalagent.conversation;
 
+import io.github.likeelysia.formalagent.account.UserCommitLock;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import jakarta.annotation.PostConstruct;
 import java.util.List;
@@ -20,9 +21,15 @@ public class ConversationService {
     private static final Logger log = LoggerFactory.getLogger(ConversationService.class);
 
     private final ConversationStore store;
+    private final UserCommitLock commitLock;
 
     public ConversationService(ConversationStore store) {
+        this(store, null);
+    }
+
+    public ConversationService(ConversationStore store, UserCommitLock commitLock) {
         this.store = store;
+        this.commitLock = commitLock;
     }
 
     /** 启动就把默认会话兜住 —— 用户第一次打开,"默认对话"已经在那儿了。 */
@@ -59,7 +66,17 @@ public class ConversationService {
     }
 
     public void delete(String id) {
-        store.delete(resolve(id));
+        String resolved = resolve(id);
+        if (commitLock == null) {
+            store.delete(resolved);
+            return;
+        }
+        commitLock.lock();
+        try {
+            store.delete(resolved);
+        } finally {
+            commitLock.unlock();
+        }
     }
 
     /**
@@ -156,10 +173,22 @@ public class ConversationService {
      */
     public ConversationMeta shareMemory(String id, String targetId) {
         String me = requireExisting(id);
+        if (commitLock == null) {
+            return shareMemoryUnlocked(me, targetId);
+        }
+        commitLock.lock();
+        try {
+            return shareMemoryUnlocked(me, targetId);
+        } finally {
+            commitLock.unlock();
+        }
+    }
+
+    private ConversationMeta shareMemoryUnlocked(String me, String targetId) {
         if (targetId == null || targetId.isBlank() || targetId.strip().equals(me)) {
             return store.update(me, c -> c.withScope(me)).meta();
         }
-        String root = memoryScopeOf(targetId.strip());     // 目标不存在 / id 非法 → 这里报错
+        String root = memoryScopeOf(targetId.strip());
         return store.update(me, c -> c.withScope(root)).meta();
     }
 
