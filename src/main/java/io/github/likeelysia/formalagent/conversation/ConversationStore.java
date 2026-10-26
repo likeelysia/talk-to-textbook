@@ -152,7 +152,11 @@ public class ConversationStore {
             return null;                                  // 没档可读,是正常情况
         }
         try {
-            return mapper.readValue(Files.readString(file), Conversation.class);
+            Conversation parsed = mapper.readValue(Files.readString(file), Conversation.class);
+            if (parsed == null || parsed.id() == null || !id.equals(parsed.id())) {
+                return null;                              // 元数据/坏文件不能进索引
+            }
+            return parsed;
         } catch (IOException e) {
             log.warn("会话文件读不出来({}):{}", file.getFileName(), e.getMessage());
             return null;                                  // 坏文件不该让整个侧栏打不开
@@ -187,7 +191,8 @@ public class ConversationStore {
     /** 把某个会话的档案写进 index(有就替换、没有就追加)。 */
     private void updateIndex(ConversationMeta meta) {
         List<ConversationMeta> metas = new ArrayList<>(readIndex().conversations());
-        metas.removeIf(m -> m.id().equals(meta.id()));
+        if (meta == null || meta.id() == null) return;
+        metas.removeIf(m -> meta.id().equals(m.id()));
         metas.add(meta);
         writeIndexFile(metas);
     }
@@ -202,7 +207,11 @@ public class ConversationStore {
                     if (!name.endsWith(SUFFIX) || name.equals(INDEX_FILE)) {
                         continue;
                     }
-                    Conversation found = read(name.substring(0, name.length() - SUFFIX.length()));
+                    String id = name.substring(0, name.length() - SUFFIX.length());
+                    if (!id.matches(ID_PATTERN)) {
+                        continue; // owners/备份等元数据，不是会话
+                    }
+                    Conversation found = read(id);
                     if (found != null) {
                         metas.add(found.meta());
                     }
