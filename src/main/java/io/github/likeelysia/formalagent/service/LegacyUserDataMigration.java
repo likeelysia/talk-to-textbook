@@ -10,20 +10,19 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/**
- * B 阶段旧单用户数据迁移：只把全局 conversations/memory 复制给明确管理员。
- * 目标与旧目录均保留；按文件类型校验结构，完成才写 v2 标记；旧 v1 标记会重新校验。
- */
+/** B 阶段旧单用户数据迁移：按资源类型显式校验/复制，完成才写 v2 标记。 */
 @Component
 public class LegacyUserDataMigration {
 
     private static final Logger log = LoggerFactory.getLogger(LegacyUserDataMigration.class);
+    private static final int SUPPORTED_MEMORY_VERSION = 1;
 
     private final AccountService accounts;
     private final AppConfig config;
@@ -62,12 +61,12 @@ public class LegacyUserDataMigration {
         try {
             Path conversationSource = Path.of(config.conversation().dir());
             Path memorySource = Path.of(config.memory().longTerm().dir());
-            copyMissing(conversationSource, conversationTarget,
+            copyConversations(conversationSource, conversationTarget,
                     conversationSource.resolve("users"));
-            copyMissing(memorySource, memoryTarget,
-                    memorySource.resolve("users"));
-            copyConfigured(Path.of(corePath), memoryTarget.resolve("core.md"), false);
-            copyConfigured(Path.of(conflictsPath), memoryTarget.resolve("conflicts.json"), true);
+            copyMemories(memorySource, memoryTarget, memorySource.resolve("users"));
+            // 显式配置的 core/conflicts 优先；默认目录残留不覆盖有效配置来源。
+            copyConfigured(Path.of(corePath), memoryTarget.resolve("core.md"), Type.CORE);
+            copyConfigured(Path.of(conflictsPath), memoryTarget.resolve("conflicts.json"), Type.CONFLICTS);
             Files.createDirectories(userRoot);
             Files.writeString(marker, "v2");
             log.info("旧用户数据已复制给 admin owner:{}", admin);
@@ -76,58 +75,99 @@ public class LegacyUserDataMigration {
         }
     }
 
-    private void copyMissing(Path source, Path target, Path usersSubtree) throws IOException {
+    private void copyConversations(Path source, Path target, Path usersSubtree) throws IOException {
         if (!Files.isDirectory(source)) return;
         try (Stream<Path> walk = Files.walk(source)) {
             for (Path p : walk.toList()) {
-                if (p.startsWith(usersSubtree)) continue;
-                Path rel = source.relativize(p);
-                Path dest = target.resolve(rel);
-                if (Files.isDirectory(p)) {
-                    Files.createDirectories(dest);
-                } else {
-                    copyFile(p, dest, p.getFileName().toString().endsWith(".json"));
+                if (p.startsWith(usersSubtree) || Files.isDirectory(p)) continue;
+                String name = p.getFileName().toString();
+                Path dest = target.resolve(source.relativize(p));
+                if (name.equals("index.json")) copyFile(p, dest, Type.INDEX);
+                else if (name.equals("owners.json")) copyFile(p, dest, Type.OWNERS);
+                else if (name.endsWith(".json")) copyFile(p, dest, Type.CONVERSATION);
+            }
+        }
+    }
+
+    private void copyMemories(Path source, Path target, Path usersSubtree) throws IOException {
+        if (!Files.isDirectory(source)) return;
+        try (Stream<Path> walk = Files.walk(source)) {
+            for (Path p : walk.toList()) {
+                if (p.startsWith(usersSubtree) || Files.isDirectory(p)) continue;
+                String name = p.getFileName().toString();
+                if (name.equals("core.md") || name.equals("conflicts.json")) continue;
+                if (name.endsWith(".json")) {
+                    copyFile(p, target.resolve(source.relativize(p)), Type.MEMORY);
                 }
             }
         }
     }
 
-    private void copyConfigured(Path source, Path target, boolean json) throws IOException {
-        if (Files.exists(source)) copyFile(source, target, json);
+    private void copyConfigured(Path source, Path target, Type type) throws IOException {
+        if (!Files.exists(source)) return;
+        if (Files.exists(target) && Files.size(target) > 0) {
+            validate(target, type);
+            log.info("目标已有有效 {}，保留用户内容:{}", type, target);
+            return;
+        }
+        copyFile(source, target, type);
     }
 
-    private void copyFile(Path source, Path target, boolean json) throws IOException {
-        if (json) validate(source);
+    private void copyFile(Path source, Path target, Type type) throws IOException {
+        validate(source, type);
         if (Files.exists(target)) {
-            if (json) validate(target);
+            validate(target, type);
             return;
         }
         Files.createDirectories(target.getParent());
         Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES);
     }
 
-    /** 按会话/索引/记忆/冲突的真实结构校验，语法正确但结构错误也必须拒绝。 */
-    private void validate(Path p) throws IOException {
+    private void validate(Path p, Type type) throws IOException {
         JsonNode node = mapper.readTree(Files.readString(p));
+        if (type == Type.CORE) return;
         if (node == null || !node.isObject()) {
-            throw new IOException("迁移文件结构不是对象:" + p);
+            throw new IOException("迁移文件结构不是对象(" + type + "):" + p);
         }
-        String name = p.getFileName().toString();
-        String path = p.toString().replace('\\', '/');
-        if (name.equals("index.json")) {
-            if (!node.has("conversations") || !node.get("conversations").isArray()) {
-                throw new IOException("会话索引结构非法:" + p);
+        switch (type) {
+            case INDEX -> {
+                if (!node.has("conversations") || !node.get("conversations").isArray()) {
+                    throw new IOException("会话索引结构非法:" + p);
+                }
             }
-        } else if (path.contains("/memory/") && name.equals("conflicts.json")) {
-            if (!node.has("conflicts") || !node.get("conflicts").isArray()) {
-                throw new IOException("冲突记录结构非法:" + p);
+            case CONVERSATION -> {
+                if (!node.has("id") || !node.has("messages") || !node.get("messages").isArray()) {
+                    throw new IOException("会话结构非法:" + p);
+                }
             }
-        } else if (path.contains("/memory/")) {
-            if (!node.has("entries") || !node.get("entries").isArray() || !node.has("version")) {
-                throw new IOException("记忆结构非法:" + p);
+            case OWNERS -> {
+                if (!node.isObject() || node.size() == 0) {
+                    throw new IOException("归属元数据结构非法:" + p);
+                }
+                node.fields().forEachRemaining(e -> {
+                    if (!e.getValue().isTextual()) {
+                        throw new IllegalArgumentException("归属元数据值必须是字符串:" + p);
+                    }
+                });
             }
-        } else if (!node.has("id") || !node.has("messages") || !node.get("messages").isArray()) {
-            throw new IOException("会话结构非法:" + p);
+            case MEMORY -> {
+                if (!node.has("version") || !node.has("entries")
+                        || !node.get("entries").isArray()) {
+                    throw new IOException("记忆结构非法:" + p);
+                }
+                int version = node.get("version").asInt(-1);
+                if (version < 1 || version > SUPPORTED_MEMORY_VERSION) {
+                    throw new IOException("不支持的记忆版本 " + version + ":" + p);
+                }
+            }
+            case CONFLICTS -> {
+                if (!node.has("conflicts") || !node.get("conflicts").isArray()) {
+                    throw new IOException("冲突记录结构非法:" + p);
+                }
+            }
+            default -> { }
         }
     }
+
+    private enum Type { INDEX, CONVERSATION, OWNERS, MEMORY, CORE, CONFLICTS }
 }
