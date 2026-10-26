@@ -30,6 +30,14 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 > 并已完成 **Spring Boot 工程化**(配置类型安全 / profile / 可执行 jar)。
 > Core loop works (ingest → vector retrieval → grounded QA with citations); Spring Boot
 > engineering (typed config / profiles / executable jar) is done.
+>
+> **生产/账号边界（2026-10-26）**：服务器运行 `0709e5e`、7287 条教材；外部
+> `text-embedding-v4` 已接通，但旧 bge-m3 向量因模型指纹变化全部失效
+> （`missingVectors=7287`），当前实际是**关键词/缓存降级**，不是完整语义检索。
+> 完整 12,925 条教材与 5 个完整学习账号都尚未完成。账号/笔记隔离目前是**本地中间成果**：
+> 只有手工笔记对普通 USER 开放，聊天、会话、记忆、生词、上传等仍待 owner 隔离，
+> 不能把当前版本文档当成“多用户全功能可用”。
+> 账号/笔记设计见 [docs/account-isolation.md](docs/account-isolation.md)，部署与已知限制见 [docs/deploy.md](docs/deploy.md)。
 
 ---
 
@@ -64,7 +72,8 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
 - **工具集**:`search_knowledge` / `knowledge_overview` / `get_knowledge_page` / **`calculator`**(自写安全表达式求值器)/ **`unit_convert`**
 - **混合检索 + 阈值**:向量 + 关键词加权;相似度不够就当作“没找到”(`fa.knowledge.min-score`)
 - **多图问答**:`POST /api/agent`(multipart)一次可传 **最多 10 张**图 → 逐张视觉识别(按序号合并成一段文字)→ Agent 回答;单张失败自动跳过
-- **接口鉴权**:管理接口(`/api/ingest`、`/api/knowledge/source`)需请求头 `X-Admin-Key`
+- **接口鉴权**:持久化邀请账号（SQLite，ADMIN/USER，邀请/停用/重置）；管理接口(`/api/ingest`、`/api/knowledge/source`)需 `X-Admin-Key`，公共教材写操作还必须是 ADMIN；`X-Admin-Key` 未配置时管理接口拒绝（503）。
+- **账号与笔记隔离（中间成果）**:笔记按服务端认证 `userId` 分目录；普通 USER 可用 `/api/notes/manual` 新建、读取、编辑、删除自己的笔记，跨账号 ID 统一拒绝；`notes.html` 只提供笔记范围。会话/聊天/记忆/生词/上传尚未完成 owner 隔离，普通 USER 访问这些入口会被服务端拒绝；**5 个完整学习账号尚未实现**。
 - **知识库来源管理(删 / 换)**:可按“哪本书”(来源)整本**删除**或**重灌** —— 
   `IngestMain --list / --remove-source / --replace` 与 `DELETE /api/knowledge/source` / `POST /api/ingest?replace=true`;
   灌库漏页(`failedPages`)会记进断点并在下次开跑时自动补灌,详见下方「灌库断点」
@@ -101,7 +110,7 @@ semantic (embedding) retrieval** over that knowledge base — with citations.
   四个指标 recall@5 / MRR / 页命中@5 / 拒答率,`mvnw -o test -Dtest=RetrievalEvalTest` 一跑就知道检索有没有变差
 - **配置**:`application.yml` + `@ConfigurationProperties`(类型安全)+ **profile**
 - **调用日志**:按天滚动到 `logs/api-YYYY-MM-DD.log`(经 SLF4J/Logback)
-- **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`/api/memory`(记忆的看 / 加 / 改 / 钉 / 删 / 导出)、`GET /api/health`
+- **HTTP 接口(REST)**:`POST /api/agent`、`POST /api/agent/stream`、`POST /api/ingest`、`DELETE /api/knowledge/source`、`GET /api/knowledge`、`/api/conversations`、`/api/memory`(记忆的看 / 加 / 改 / 钉 / 删 / 导出)、`/api/notes`、`/api/notes/manual`、`/api/auth/me`、`/api/admin/accounts`、`/api/knowledge/count|page|item`、`/api/knowledge/vectors/status|backfill`、`GET /api/health`
 - **Spring Boot 工程化**:可执行 fat jar(`java -jar`)、内嵌 Tomcat、内嵌日志(SLF4J/Logback)
 - **自动测试**：包含 Boot 容器冒烟、配置绑定、词表与释义处理、生词本恢复、模型超时和访问保护；实际数量以当前 Surefire 报告为准，不调用真实模型 API。
 
@@ -296,6 +305,7 @@ src/main/java/io/github/likeelysia/formalagent/
 ├── agent/      # Agent 主循环(ReAct)+ 工具(Tool 接口 / search_knowledge / knowledge_overview / get_knowledge_page)
 ├── service/    # AssistantService(一问一答的全流程)、ChatService(对话)、QaService(图片问答)、FileStorage(上传落盘)
 ├── web/        # Controller(REST + SSE 流式)+ SseStreamer + 统一异常处理
+├── account/    # AccountStore(SQLite)/ AccountService / 角色与会话版本
 └── store/      # SessionStore —— 存档 / 读档 / 导出
 
 src/main/resources/static/
@@ -355,6 +365,10 @@ variables, and `.gitignore` blocks common secret files as well as generated data
 - [x] **多轮上下文(短期记忆)**:最近 N 轮原文 + 超窗口的**滚动摘要**,模型终于“记得”上一句(`fa.memory.short-term.*`)
 - [x] **长期记忆**:后台提炼(规则预筛 + 模型打分)+ 相似度召回 top-K,按记忆域(`scopeId`)分桶(`fa.memory.long-term.*`)
 - [x] **记忆治理**:看得见 / 改得动 / 删得掉(前端「🧠 记忆」抽屉 + `/api/memory`)+ 钉住(`pin`)不淘汰 + 总量上限淘汰最久没用的 + 导出
+- [x] **持久化邀请账号 + 笔记 owner 隔离（中间成果）**
+- [x] **笔记损坏/归属文件损坏 fail-closed（本地返工）**
+- [ ] 5 个 USER 的聊天/会话/摘要/记忆/生词/上传完整 owner 隔离
+- [ ] 完整 12,925 条教材与外部 embedding 全量向量/60 题评测
 - [ ] 更多工具(联网搜索 —— 需配 Prompt Injection 防护)
 - [ ] 向量库(知识到 10 万条量级再上)
 
