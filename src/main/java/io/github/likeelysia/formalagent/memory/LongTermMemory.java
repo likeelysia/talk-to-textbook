@@ -809,6 +809,8 @@ public class LongTermMemory {
     public boolean forget(String conversationId, String id) {
         String scope = scopeOf(conversationId);
         boolean[] removed = new boolean[1];
+        if (commitLock != null) commitLock.lock();
+        try {
         store.updateAndBumpGeneration(scope, entries -> {
             List<MemoryEntry> next = new ArrayList<>(entries.size());
             for (MemoryEntry entry : entries) {
@@ -822,6 +824,9 @@ public class LongTermMemory {
             return trim(scope, next);
         });
         return removed[0];
+        } finally {
+            if (commitLock != null) commitLock.unlock();
+        }
     }
 
     /**
@@ -831,7 +836,12 @@ public class LongTermMemory {
      * 已经聊过的那些轮不会被重新提炼一遍。
      */
     public void forgetAll(String conversationId) {
-        store.clear(scopeOf(conversationId));
+        if (commitLock != null) commitLock.lock();
+        try {
+            store.clear(scopeOf(conversationId));
+        } finally {
+            if (commitLock != null) commitLock.unlock();
+        }
     }
 
     /**
