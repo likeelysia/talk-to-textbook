@@ -79,6 +79,8 @@ public class LongTermMemory {
     private final Executor executor;
     private final MemoryReconciler reconciler;
     private final MemoryConflictStore conflicts;
+    /** 共享执行器由 Spring 统一关闭；单用户实例不能关闭全应用的池。 */
+    private final boolean ownsExecutor;
 
     /** 每个会话的失败退避:避免服务挂了以后每一轮都立即重试。 */
     private final Map<String, Retry> retries = new ConcurrentHashMap<>();
@@ -95,7 +97,15 @@ public class LongTermMemory {
     public LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                           ConversationService conversations, AppConfig config,
                           MemoryReconciler reconciler, MemoryConflictStore conflicts) {
-        this(store, extractor, embedder, conversations, longTermOf(config), worker(), reconciler, conflicts);
+        this(store, extractor, embedder, conversations, longTermOf(config), worker(), reconciler, conflicts, true);
+    }
+
+    /** 共享执行器版本：执行器生命周期不属于单个用户实例。 */
+    public LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
+                          ConversationService conversations, AppConfig.Memory.LongTerm config,
+                          Executor executor, MemoryReconciler reconciler,
+                          MemoryConflictStore conflicts) {
+        this(store, extractor, embedder, conversations, config, executor, reconciler, conflicts, false);
     }
 
     /** 测试 / 手工装配用:传一个"就在当前线程跑"的 Executor,提炼就变成同步的,断言才好写。 */
@@ -103,18 +113,19 @@ public class LongTermMemory {
                           ConversationService conversations, AppConfig.Memory.LongTerm config,
                           Executor executor) {
         this(store, extractor, embedder, conversations, config, executor,
-                (candidates, neighbors) -> java.util.Map.of(), null);
+                (candidates, neighbors) -> java.util.Map.of(), null, true);
     }
 
     LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                    ConversationService conversations, AppConfig.Memory.LongTerm config,
                    Executor executor, MemoryReconciler reconciler) {
-        this(store, extractor, embedder, conversations, config, executor, reconciler, null);
+        this(store, extractor, embedder, conversations, config, executor, reconciler, null, true);
     }
 
     LongTermMemory(MemoryStore store, MemoryExtractor extractor, EmbeddingClient embedder,
                    ConversationService conversations, AppConfig.Memory.LongTerm config,
-                   Executor executor, MemoryReconciler reconciler, MemoryConflictStore conflicts) {
+                   Executor executor, MemoryReconciler reconciler, MemoryConflictStore conflicts,
+                   boolean ownsExecutor) {
         this.store = store;
         this.extractor = extractor;
         this.embedder = embedder;
@@ -123,6 +134,7 @@ public class LongTermMemory {
         this.executor = executor;
         this.reconciler = reconciler;
         this.conflicts = conflicts;
+        this.ownsExecutor = ownsExecutor;
     }
 
     /** 开关(关掉 = 既不提炼也不召回)。 */
@@ -994,7 +1006,7 @@ public class LongTermMemory {
 
     @PreDestroy
     public void shutdown() {
-        if (executor instanceof ExecutorService service) {
+        if (ownsExecutor && executor instanceof ExecutorService service) {
             service.shutdownNow();
         }
     }
