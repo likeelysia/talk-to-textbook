@@ -421,6 +421,15 @@ public class LongTermMemory {
         }
     }
 
+    private boolean taskStillValid(String conversationId, String scopeId) {
+        try {
+            conversations.get(conversationId);
+            return scopeId.equals(conversations.memoryScopeOf(conversationId));
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     private int pendingFrom(Conversation conversation) {
         return Math.min(Math.max(conversation.memoryCount(), 0), conversation.messages().size());
     }
@@ -474,6 +483,9 @@ public class LongTermMemory {
         long[] counts = new long[3];       // 0=新增 1=覆盖 2=删除
         List<String> conflictTexts = new ArrayList<>();
         MemoryStore.BatchCommit commit = store.updateBatch(scopeId, expectedGeneration, batchKey, entries -> {
+            if (batchKey != null && !taskStillValid(conversationId, scopeId)) {
+                throw new AgentException("迟到记忆任务已失效:会话删除或scope变更");
+            }
             List<MemoryEntry> next = new ArrayList<>(entries);
             for (int i = 0; i < candidates.size(); i++) {
                 MemoryCandidate candidate = candidates.get(i);
