@@ -96,7 +96,7 @@ public class NoteStore {
         }
         synchronized (lock) {
             Path target = fileFor(ownerId);
-            List<Note> current = new ArrayList<>(read(target));
+            List<Note> current = new ArrayList<>(readStrict(target));
             Set<String> keys = new LinkedHashSet<>();
             for (Note n : current) {
                 keys.add(n.dedupKey());
@@ -122,7 +122,7 @@ public class NoteStore {
     public boolean delete(String ownerId, String id) {
         synchronized (lock) {
             Path target = fileFor(ownerId);
-            List<Note> current = new ArrayList<>(read(target));
+            List<Note> current = new ArrayList<>(readStrict(target));
             boolean removed = current.removeIf(n -> n.id().equals(id));
             if (removed) {
                 write(target, List.copyOf(current));
@@ -135,7 +135,7 @@ public class NoteStore {
     public Optional<Note> update(String ownerId, String id, String question, List<Note.Answer> answers) {
         synchronized (lock) {
             Path target = fileFor(ownerId);
-            List<Note> current = new ArrayList<>(read(target));
+            List<Note> current = new ArrayList<>(readStrict(target));
             for (int i = 0; i < current.size(); i++) {
                 Note n = current.get(i);
                 if (n.id().equals(id)) {
@@ -154,9 +154,8 @@ public class NoteStore {
     /**
      * 把旧的全局 notes.json 迁给指定管理员 owner。
      *
-     * <p>目标不存在：整本复制；目标已存在（例如首轮 bug 先建了 admin 目录）：
-     * 只补 id 缺失的旧笔记，不覆盖已编辑内容。迁移完成后写标记，重复启动不会再把
-     * 管理员已删除的旧笔记追加回来。
+     * <p>源或目标解析失败时严格中止，不把损坏文件当空库，不覆盖原件，也不写迁移标记。
+     * 只有目标成功原子提交后才标记 v2；旧版本写下的 "1" 标记视为未验证，允许修复后重试。
      */
     public boolean migrateLegacy(String ownerId) {
         synchronized (lock) {
@@ -167,30 +166,37 @@ public class NoteStore {
             if (parent == null) return false;
             Path marker = parent.resolve(".legacy-migrated");
             if (Files.exists(marker)) {
-                return false;
+                String content;
+                try {
+                    content = Files.readString(marker).strip();
+                } catch (IOException e) {
+                    throw new AgentException("迁移标记不可读,拒绝迁移:" + e.getMessage(), e);
+                }
+                if ("v2".equals(content)) return false;
+                log.warn("发现旧版迁移标记({}),将按 v2 规则重新校验后迁移", content);
             }
             Path target = fileFor(ownerId);
-            List<Note> legacy = read(file);
+            List<Note> legacy = readStrict(file);          // 坏源 → 抛错，不标成功
+            List<Note> current = Files.exists(target)
+                    ? new ArrayList<>(readStrict(target))  // 坏目标 → 抛错，不覆盖
+                    : new ArrayList<>();
             if (legacy.isEmpty()) {
                 markMigrated(marker);
                 return false;
             }
             boolean changed = false;
-            if (!Files.exists(target)) {
-                write(target, legacy);
-                changed = true;
-            } else {
-                List<Note> current = new ArrayList<>(read(target));
-                Set<String> ids = new LinkedHashSet<>();
-                for (Note n : current) ids.add(n.id());
-                for (Note n : legacy) {
-                    if (ids.add(n.id())) {
-                        current.add(n);
-                        changed = true;
-                    }
+            Set<String> ids = new LinkedHashSet<>();
+            for (Note n : current) ids.add(n.id());
+            for (Note n : legacy) {
+                if (ids.add(n.id())) {
+                    current.add(n);
+                    changed = true;
                 }
-                if (changed) write(target, List.copyOf(current));
             }
+            if (changed) {
+                write(target, List.copyOf(current));
+            }
+            // 只有目标写入成功（或无需写）才标记 v2；标记失败下次可幂等重试。
             markMigrated(marker);
             log.info("旧笔记本迁移到 owner {}:legacy={} changed={}(原文件保留)",
                     ownerId, legacy.size(), changed);
@@ -201,7 +207,15 @@ public class NoteStore {
     private static void markMigrated(Path marker) {
         try {
             Files.createDirectories(marker.toAbsolutePath().getParent());
-            Files.writeString(marker, "1");
+            Path tmp = Files.createTempFile(marker.toAbsolutePath().getParent(),
+                    marker.getFileName().toString(), ".tmp");
+            Files.writeString(tmp, "v2");
+            try {
+                Files.move(tmp, marker, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicFailure) {
+                Files.move(tmp, marker, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             throw new AgentException("旧笔记迁移标记写入失败:" + e.getMessage());
         }
@@ -226,6 +240,15 @@ public class NoteStore {
     }
 
     private List<Note> read(Path target) {
+        return read(target, false);
+    }
+
+    /** 写路径/迁移使用：解析或 IO 失败必须抛错，不能把坏文件当空库。 */
+    private List<Note> readStrict(Path target) {
+        return read(target, true);
+    }
+
+    private List<Note> read(Path target, boolean strict) {
         if (!Files.exists(target)) {
             return List.of();
         }
@@ -233,8 +256,11 @@ public class NoteStore {
             NoteFile parsed = mapper.readValue(Files.readString(target), NoteFile.class);
             return parsed.notes() == null ? List.of() : parsed.notes();
         } catch (IOException e) {
+            if (strict) {
+                throw new AgentException("笔记本文件损坏或不可读,拒绝覆盖:" + target, e);
+            }
             log.warn("笔记本读不出来({}):{}", target.getFileName(), e.getMessage());
-            return List.of();                    // 坏文件不该让整个页面打不开
+            return List.of();                    // 页面读取允许友好降级;写路径走 strict
         }
     }
 
@@ -243,12 +269,30 @@ public class NoteStore {
     }
 
     private void write(Path target, List<Note> notes) {
+        Path tmp = null;
         try {
-            Files.createDirectories(target.toAbsolutePath().getParent());
+            Path parent = target.toAbsolutePath().getParent();
+            Files.createDirectories(parent);
+            tmp = Files.createTempFile(parent, target.getFileName().toString(), ".tmp");
             mapper.writerWithDefaultPrettyPrinter()
-                    .writeValue(target.toFile(), new NoteFile(notes));
+                    .writeValue(tmp.toFile(), new NoteFile(notes));
+            if (Files.exists(target)) {
+                Files.copy(target, target.resolveSibling(target.getFileName() + ".bak"),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            try {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicFailure) {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            tmp = null;
         } catch (IOException e) {
             throw new AgentException("笔记本保存失败:" + e.getMessage());
+        } finally {
+            if (tmp != null) {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignored) { }
+            }
         }
     }
 }

@@ -15,8 +15,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * <p><b>为什么需要</b>:管理接口(入库)能写知识库、能读服务器文件;而且<b>每个问答请求都会
  * 花我们的 API key 的钱</b> —— 不设鉴权等于把钱包挂在公网上。
  *
- * <p>密钥从环境变量来({@code FA_ADMIN_KEY}),不落配置文件。**没配时自动关闭**并打 WARN ——
- * 本地开发方便,上线前务必设上。
+ * <p>密钥从环境变量来({@code FA_ADMIN_KEY}),不落配置文件。**没配时管理接口拒绝(503)**,
+ * 不再静默放行;本地需要管理功能时显式设置环境变量。
  */
 @Component
 public class AdminKeyInterceptor implements HandlerInterceptor {

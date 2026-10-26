@@ -1,8 +1,10 @@
 package io.github.likeelysia.formalagent.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.likeelysia.formalagent.exception.AgentException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -98,14 +100,77 @@ class NoteStoreTest {
     }
 
     @Test
-    @DisplayName("坏文件不该让笔记本打不开")
-    void toleratesBrokenFile(@TempDir Path tmp) throws Exception {
+    @DisplayName("目标已存在:同 ID 保留编辑,只补缺失;删除后重跑不复活")
+    void mergeKeepsEditedTargetAndDoesNotReviveDeleted(@TempDir Path tmp) throws Exception {
+        Path legacy = tmp.resolve("notes.json");
+        NoteStore store = new NoteStore(MAPPER, legacy);
+        store.addAll(List.of(note("old", "c1", "旧问题", "旧回答")));
+        store.addAll("admin", List.of(note("old", "c1", "管理员改过", "新回答")));
+        assertThat(store.migrateLegacy("admin")).isFalse();
+        assertThat(store.list("admin")).extracting(Note::question).containsExactly("管理员改过");
+
+        // 额外旧条目应补入一次
+        store.addAll(List.of(note("extra", "c1", "额外旧问题", "额外旧回答")));
+        Files.delete(tmp.resolve(".legacy-migrated"));
+        assertThat(store.migrateLegacy("admin")).isTrue();
+        assertThat(store.list("admin")).extracting(Note::id).contains("old", "extra");
+
+        assertThat(store.delete("admin", "old")).isTrue();
+        assertThat(store.migrateLegacy("admin")).isFalse();
+        assertThat(store.list("admin")).extracting(Note::id).doesNotContain("old");
+    }
+
+    @Test
+    @DisplayName("坏文件:页面读空,但写路径拒绝覆盖且原字节保留")
+    void rejectsWriteWhenFileCorrupt(@TempDir Path tmp) throws Exception {
         Path file = tmp.resolve("notes.json");
-        Files.writeString(file, "{ 这不是 JSON", StandardCharsets.UTF_8);
+        byte[] bad = "{ 这不是 JSON".getBytes(StandardCharsets.UTF_8);
+        Files.write(file, bad);
         NoteStore store = new NoteStore(MAPPER, file);
         assertThat(store.list()).isEmpty();
-        assertThat(store.addAll(List.of(note("n1", "c1", "问题", "答")))).hasSize(1);
-        assertThat(store.list()).hasSize(1);
+        assertThatThrownBy(() -> store.addAll(List.of(note("n1", "c1", "问题", "答"))))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("拒绝覆盖");
+        assertThat(Files.readAllBytes(file)).isEqualTo(bad);
+    }
+
+    @Test
+    @DisplayName("坏旧库迁移:不标成功,原字节保留;修复后可迁移")
+    void corruptLegacyDoesNotMarkMigrated(@TempDir Path tmp) throws Exception {
+        Path legacy = tmp.resolve("notes.json");
+        byte[] bad = "{ 坏旧库".getBytes(StandardCharsets.UTF_8);
+        Files.write(legacy, bad);
+        NoteStore store = new NoteStore(MAPPER, legacy);
+
+        assertThatThrownBy(() -> store.migrateLegacy("admin"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("拒绝覆盖");
+        assertThat(Files.exists(tmp.resolve(".legacy-migrated"))).isFalse();
+        assertThat(Files.readAllBytes(legacy)).isEqualTo(bad);
+
+        Files.writeString(legacy, "{\"notes\":[{\"id\":\"n1\",\"conversationId\":\"c1\","
+                + "\"question\":\"问题\",\"questionAt\":1,\"answers\":[],\"savedAt\":2}]}",
+                StandardCharsets.UTF_8);
+        assertThat(store.migrateLegacy("admin")).isTrue();
+        assertThat(store.list("admin")).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("坏目标迁移:不覆盖目标,原字节保留")
+    void corruptTargetIsNotOverwritten(@TempDir Path tmp) throws Exception {
+        Path legacy = tmp.resolve("notes.json");
+        NoteStore store = new NoteStore(MAPPER, legacy);
+        store.addAll(List.of(note("old", "c1", "旧问题", "旧回答")));
+        Path target = tmp.resolve("admin").resolve("notes.json");
+        Files.createDirectories(target.getParent());
+        byte[] bad = "{ 坏目标".getBytes(StandardCharsets.UTF_8);
+        Files.write(target, bad);
+
+        assertThatThrownBy(() -> store.migrateLegacy("admin"))
+                .isInstanceOf(AgentException.class)
+                .hasMessageContaining("拒绝覆盖");
+        assertThat(Files.readAllBytes(target)).isEqualTo(bad);
+        assertThat(Files.exists(tmp.resolve(".legacy-migrated"))).isFalse();
     }
 
     @Test
