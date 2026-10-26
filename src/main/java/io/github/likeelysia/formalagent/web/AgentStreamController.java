@@ -5,8 +5,10 @@ import io.github.likeelysia.formalagent.agent.StreamSink;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.service.AssistantService;
+import io.github.likeelysia.formalagent.service.UserScopeFactory;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,22 +47,37 @@ public class AgentStreamController {
     private final AssistantService assistant;
     private final ConversationService conversations;
     private final SseStreamer streams;
+    private final UserScopeFactory users;
+    private final CurrentUser currentUser;
 
     public AgentStreamController(AssistantService assistant, ConversationService conversations,
                                  SseStreamer streams) {
+        this(assistant, conversations, streams, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentStreamController(AssistantService assistant, ConversationService conversations,
+                                 SseStreamer streams, UserScopeFactory users,
+                                 CurrentUser currentUser) {
         this.assistant = assistant;
         this.conversations = conversations;
         this.streams = streams;
+        this.users = users;
+        this.currentUser = currentUser;
     }
 
     /** 请求体沿用 {@link AgentController.AgentRequest}(question + conversationId),同一个东西不重复定义。 */
     @PostMapping(value = "/agent/stream",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestBody AgentController.AgentRequest req) {
+    public SseEmitter stream(Authentication auth, @RequestBody AgentController.AgentRequest req) {
         if (req == null || req.question() == null || req.question().isBlank()) {
             throw new AgentException("question 不能为空");
         }
+        AssistantService assistant = users == null ? this.assistant
+                : users.of(currentUser.id(auth)).assistant();
+        ConversationService conversations = users == null ? this.conversations
+                : users.of(currentUser.id(auth)).conversations();
         String conversationId = conversations.requireExisting(req.conversationId());
 
         SseEmitter emitter = newEmitter();
@@ -68,7 +85,7 @@ public class AgentStreamController {
         emitter.onCompletion(() -> cancelled.set(true));
         emitter.onTimeout(() -> cancelled.set(true));
         emitter.onError(error -> cancelled.set(true));
-        streams.start(emitter, out -> pipe(out, conversationId, req.question(), cancelled),
+        streams.start(emitter, out -> pipe(assistant, out, conversationId, req.question(), cancelled),
                 () -> cancelled.set(true));
         return emitter;
     }
@@ -78,12 +95,16 @@ public class AgentStreamController {
      * 事件顺序是这个接口的核心契约,
      * 不测的话哪天顺手调换两行都没人发现。
      */
+    public SseEmitter stream(AgentController.AgentRequest req) {
+        return stream(null, req);
+    }
+
     protected SseEmitter newEmitter() {
         return new SseEmitter(TIMEOUT_MS);
     }
 
     /** 真正的推送:把 StreamSink 的三个动作翻译成 SSE 事件,结束时补一条 done。 */
-    private void pipe(SseEmitter out, String conversationId, String question, AtomicBoolean cancelled) {
+    private void pipe(AssistantService assistant, SseEmitter out, String conversationId, String question, AtomicBoolean cancelled) {
         SseStreamer.sendEvent(out, "meta", Map.of("conversationId", conversationId));
 
         AssistantService.Turn turn = assistant.askStream(conversationId, question, question, new StreamSink() {
