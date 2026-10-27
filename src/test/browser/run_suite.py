@@ -43,8 +43,9 @@ try:
     a = run('slow_json_test.py')
     b = run('sse_same_page_test.py')
     c = run('expected_user_test.py')
-    exit_code = 0 if a == 0 and b == 0 and c == 0 else 1
-    print(f'SUITE slow_json={a} sse_same_page={b} expected_user={c} exit={exit_code}', flush=True)
+    d = run('learning_chain_test.py')
+    exit_code = 0 if a == 0 and b == 0 and c == 0 and d == 0 else 1
+    print(f'SUITE slow_json={a} sse_same_page={b} expected_user={c} learning_chain={d} exit={exit_code}', flush=True)
 finally:
     pid_file = RUN / 'runtime' / 'java.pid'
     pid = None
