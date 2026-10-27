@@ -1646,19 +1646,28 @@ document.querySelectorAll('form[action="/logout"]').forEach(form => {
     });
 });
 async function recheckIdentity() {
+    const expectedUser = authUserId;
+    authEpoch++;
     const startEpoch = authEpoch;
     identityReady = false;
     clearPrivateDom();
+    if (streamCtrl) streamCtrl.abort();
     try {
         const r = await window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}});
         const me = r.ok ? await r.json() : null;
         if (startEpoch !== authEpoch) return;
-        if (!me || !me.authenticated || me.userId !== authUserId) {
+        if (!me || !me.authenticated || me.userId !== expectedUser) {
             bumpAuthEpoch(true);
             return;
         }
         document.body.classList.remove('identity-invalid');
+        document.querySelectorAll('button, input, textarea, form').forEach(el => {
+            if (el.closest('.desk-actions')) return;
+            el.disabled = false;
+        });
         identityReady = true;
+        initConversations();
+        loadKnowledge();
     } catch (_) {
         if (startEpoch === authEpoch) bumpAuthEpoch(true);
     }
