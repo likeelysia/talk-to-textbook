@@ -486,6 +486,18 @@ public class LongTermMemory {
         }
         Map<Integer, MemoryReconciler.Decision> decisions = reconciler.decide(candidates, neighbors);
 
+        float[][] rewrittenVectors = new float[candidates.size()][];
+        for (int i = 0; i < candidates.size(); i++) {
+            MemoryReconciler.Decision d = decisions.get(i);
+            if (d != null && MemoryReconciler.UPDATE.equalsIgnoreCase(d.op())) {
+                String finalText = d.text() == null || d.text().isBlank()
+                        ? candidates.get(i).text() : d.text();
+                if (!finalText.equals(candidates.get(i).text())) {
+                    rewrittenVectors[i] = tryEmbed(finalText);
+                }
+            }
+        }
+
         if (commitLock != null) commitLock.lock();
         try {
         long[] counts = new long[3];       // 0=新增 1=覆盖 2=删除
@@ -512,8 +524,8 @@ public class LongTermMemory {
                     continue;
                 }
                 boolean applied = decision != null
-                        && applyDecision(next, decision, candidate, vector, neighbors.get(i),
-                        scopeId, conversationId, counts);
+                        && applyDecision(next, decision, candidate, vector, rewrittenVectors[i],
+                        neighbors.get(i), scopeId, conversationId, counts);
                 if (!applied) {
                     fallbackStore(next, scopeId, candidate, vector, conversationId, counts);
                 }
@@ -540,7 +552,8 @@ public class LongTermMemory {
 
     /** 应用一个对账决策;返回 false = 没应用成功,交给兜底逻辑。 */
     private boolean applyDecision(List<MemoryEntry> entries, MemoryReconciler.Decision decision,
-                                  MemoryCandidate candidate, float[] vector, List<MemoryEntry> neighbors,
+                                  MemoryCandidate candidate, float[] vector, float[] rewrittenVector,
+                                  List<MemoryEntry> neighbors,
                                   String scopeId, String conversationId, long[] counts) {
         String op = decision.op() == null ? "" : decision.op().toUpperCase(java.util.Locale.ROOT);
         switch (op) {
@@ -588,7 +601,7 @@ public class LongTermMemory {
                         ? candidate.text()
                         : decision.text();
                 // 向量必须由最终保存的文本生成 —— 对账模型可能改了措辞
-                float[] finalVector = finalText.equals(candidate.text()) ? vector : tryEmbed(finalText);
+                float[] finalVector = finalText.equals(candidate.text()) ? vector : rewrittenVector;
                 entries.set(index, old.superseded());          // 旧条留着,只是不再召回
                 entries.add(MemoryEntry.superseding(old, finalText, conversationId, finalVector));
                 counts[1]++;
