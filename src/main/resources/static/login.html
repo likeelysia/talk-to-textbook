@@ -129,6 +129,7 @@
         event.preventDefault();
         const token = await ensureToken();
         if (token) {
+            try { localStorage.setItem('fa.authSignal', String(Date.now()) + ':' + Math.random()); } catch (_) {}
             form.submit();
         } else {
             error.textContent = '页面已过期，请刷新后重试。';

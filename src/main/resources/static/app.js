@@ -165,6 +165,12 @@ function bumpAuthEpoch(redirect = false) {
     if (redirect) redirectToLogin();
 }
 
+function notifyAuthChange() {
+    try {
+        localStorage.setItem('fa.authSignal', String(Date.now()) + ':' + Math.random());
+    } catch (_) {}
+}
+
 async function initUserStorage() {
     const startEpoch = authEpoch;
     try {
@@ -179,6 +185,7 @@ async function initUserStorage() {
         localStorage.removeItem('fa.conversationId');
         authEpoch++;
         identityReady = true;
+        notifyAuthChange();
         return true;
     } catch (e) {
         if (e instanceof IdentityChangedError) return;
@@ -543,9 +550,13 @@ async function authFetch(url, options) {
     const method = (opts.method || 'GET').toUpperCase();
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         const token = csrfToken();
-        if (token) {
-            opts.headers = Object.assign({}, opts.headers || {}, { 'X-XSRF-TOKEN': token });
+        const headers = Object.assign({}, opts.headers || {});
+        if (token) headers['X-XSRF-TOKEN'] = token;
+        if (authUserId && ['/api/conversations', '/api/memory', '/api/notes', '/api/agent']
+                .some(p => String(url).startsWith(p))) {
+            headers['X-Expected-User-Id'] = authUserId;
         }
+        opts.headers = headers;
     }
     if (!identityReady) throw new IdentityChangedError();
     const epochAtStart = authEpoch;
@@ -554,6 +565,10 @@ async function authFetch(url, options) {
         throw new IdentityChangedError();
     }
     res.__authEpoch = epochAtStart;
+    if (res.status === 409 && res.headers.get('X-Identity-Mismatch') === '1') {
+        bumpAuthEpoch(true);
+        throw new IdentityChangedError();
+    }
     if (res.status === 401) {
         redirectToLogin();
         throw new Error('登录已过期，请重新登录');
@@ -1682,6 +1697,7 @@ document.addEventListener('keydown', (e) => {
 ensureLogoutCsrf();
 document.querySelectorAll('form[action="/logout"]').forEach(form => {
     form.addEventListener('submit', () => {
+        notifyAuthChange();
         bumpAuthEpoch();
         if (streamCtrl) streamCtrl.abort();
     });
@@ -1721,6 +1737,12 @@ window.addEventListener('pageshow', (event) => {
 });
 window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && identityReady) recheckIdentity();
+});
+window.addEventListener('focus', () => {
+    if (identityReady) recheckIdentity();
+});
+window.addEventListener('storage', (event) => {
+    if (event.key === 'fa.authSignal' && identityReady) recheckIdentity();
 });
 (function unusedOldPageshow() {
     if (false) {

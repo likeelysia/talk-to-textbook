@@ -94,7 +94,7 @@ class Client:
         assert code == 302, code
         self.token = self.req('/api/auth/csrf')[1]['token']
 
-jar = ROOT / 'dist/talk-to-textbook-0.1.0-976ad9b-local-review.jar'
+jar = Path(os.environ.get('BROWSER_JAR', str(ROOT / 'dist/talk-to-textbook-0.1.0-identity-guard-local-review.jar')))
 args = [r'F:/opc-tools/android/jdk-17.0.20.1+1/bin/java.exe', '-Xmx384m', '-Dfile.encoding=UTF-8', '-jar', str(jar),
         '--server.address=127.0.0.1', '--server.port=' + str(port), '--fa.cli.enabled=false',
         '--fa.auth.username=review_admin', '--fa.auth.password=' + password, '--fa.auth.password-hash=',
