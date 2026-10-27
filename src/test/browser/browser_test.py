@@ -81,6 +81,29 @@ with sync_playwright() as pw:
     p1.screenshot(path=str(OUT / 'multi-tab-old-page.png'), full_page=True)
     c_ctx.close()
 
+    # SSE：A 先收到唯一 delta，流被挂起；真实退出并登录 B 后再释放旧流
+    s_ctx = browser.new_context()
+    sa = login(s_ctx, 'review_A')
+    sa.fill('#question', 'SLOW_SSE')
+    sa.click('#send')
+    sa.wait_for_selector('text=SYNTHETIC_SLOW_FIRST', timeout=15000)
+    sb = s_ctx.new_page()
+    sb.goto(BASE + '/study.html', wait_until='domcontentloaded')
+    sb.wait_for_load_state('networkidle')
+    sb.click('form[action="/logout"] button')
+    sb.wait_for_url('**/', timeout=15000)
+    sb.goto(BASE + '/login.html', wait_until='domcontentloaded')
+    sb.fill('input[name=username]', 'review_B')
+    sb.fill('input[name=password]', PW)
+    sb.click('button[type=submit]')
+    sb.wait_for_url('**/study.html', timeout=15000)
+    import urllib.request
+    urllib.request.urlopen(BASE + '/release', timeout=5).read()
+    sb.wait_for_timeout(2000)
+    rec('sse_identity_switch_does_not_leak_into_B', 'SYNTHETIC_SLOW_FIRST' not in sb.inner_text('body'), {'url': sb.url})
+    sb.screenshot(path=str(OUT / 'B-after-slow-sse.png'), full_page=True)
+    s_ctx.close()
+
     browser.close()
 
 (ROOT / 'target/browser-results.json').write_text(json.dumps({'base': BASE, 'results': results}, ensure_ascii=False, indent=2), encoding='utf-8')

@@ -14,6 +14,13 @@ if RUNTIME.exists():
 
 class Fake(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
+    def do_GET(self):
+        if self.path == '/release':
+            release.set()
+            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+            return
+        self.send_response(404); self.end_headers()
+
     def do_POST(self):
         b = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         if 'input' in b:
@@ -22,14 +29,20 @@ class Fake(BaseHTTPRequestHandler):
             raw = json.dumps(data).encode(); self.send_response(200)
             self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw); return
         if b.get('stream'):
-            raw = ('data: {"choices":[{"delta":{"content":"SYNTHETIC_STREAM_ANSWER"}}]}\n\n'
-                   'data: [DONE]\n\n').encode()
+            slow = 'SLOW_SSE' in json.dumps(b, ensure_ascii=False)
+            first = 'SYNTHETIC_SLOW_FIRST' if slow else 'SYNTHETIC_STREAM_ANSWER'
             self.send_response(200); self.send_header('Content-Type', 'text/event-stream')
-            self.end_headers(); self.wfile.write(raw); return
+            self.end_headers()
+            self.wfile.write(('data: {"choices":[{"delta":{"content":"%s"}}]}\n\n' % first).encode())
+            self.wfile.flush()
+            if slow:
+                release.wait(20)
+            self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush(); return
         data = {'choices': [{'message': {'role': 'assistant', 'content': 'SYNTHETIC_MODEL_ANSWER', 'tool_calls': []}, 'finish_reason': 'stop'}]}
         raw = json.dumps(data).encode(); self.send_response(200)
         self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw)
 
+release = threading.Event()
 fake = ThreadingHTTPServer(('127.0.0.1', 0), Fake)
 threading.Thread(target=fake.serve_forever, daemon=True).start()
 with socket.socket() as s:
