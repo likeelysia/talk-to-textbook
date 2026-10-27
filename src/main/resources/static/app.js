@@ -57,6 +57,15 @@ let picked = [];
 
 /** 正在进行的流式请求:非 null 就说明"正在生成",用它来防重复提交 / 实现停止。 */
 let streamCtrl = null;
+let activeUserOp = null;
+function beginUserOp() {
+    const op = { epoch: authEpoch, id: Symbol('user-op') };
+    activeUserOp = op;
+    return op;
+}
+function opAlive(op) {
+    return op && activeUserOp === op && op.epoch === authEpoch && identityReady;
+}
 
 /* ---------------- 通用对话框(重命名 / 删除确认) ----------------
 
@@ -784,6 +793,7 @@ formEl.addEventListener('submit', async (e) => {
     renderPreviews();
     setHint('');
 
+    const submitOp = beginUserOp();
     try {
         if (filesToSend.length) {
             await answerByImages(filesToSend, question);    // 图片要先逐张识别,仍走老接口
@@ -835,13 +845,13 @@ async function readSse(body, onEvent) {
         while ((idx = buf.indexOf('\n\n')) >= 0) {
             const ev = parseSseEvent(buf.slice(0, idx));
             buf = buf.slice(idx + 2);
-            if (sseEpoch !== authEpoch) throw new Error('身份已切换，停止旧流');
+            if (sseEpoch !== authEpoch) throw new IdentityChangedError();
             if (ev) onEvent(ev.name, ev.data);
         }
     }
     if (buf.trim()) {                                   // 收尾那一条可能没跟空行
         const ev = parseSseEvent(buf);
-        if (sseEpoch !== authEpoch) throw new Error('身份已切换，停止旧流');
+        if (sseEpoch !== authEpoch) throw new IdentityChangedError();
         if (ev) onEvent(ev.name, ev.data);
     }
 }
@@ -878,6 +888,7 @@ function safeToRenderPartial(text) {
  *   ③ 收到 done(或停止/断线)再整体重画一遍 —— 终稿一定是最准的。
  */
 async function answerByStream(question) {
+    const op = activeUserOp || beginUserOp();
     const bubble = addBubble('bot',
         '<div class="answer"></div><div class="muted small stream-status">正在思考…</div>');
     const answerEl = bubble.querySelector('.answer');
@@ -976,6 +987,7 @@ async function answerByStream(question) {
         scrollToBottom(true);
     } catch (err) {
         cancelRender();
+        if (err instanceof IdentityChangedError || !opAlive(op)) return;
         if (err.name === 'AbortError') {
             if (answerText && window.marked && window.katex) {      // 停下来了也把已有的部分排版一下
                 try {
@@ -993,15 +1005,14 @@ async function answerByStream(question) {
         await fallBackToDefaultConversation(err);
     } finally {
         cancelRender();
-        if (streamCtrl === ctrl) {
-            streamCtrl = null;
-            setStreaming(false);
-        }
+        if (streamCtrl === ctrl) streamCtrl = null;
+        if (opAlive(op)) setStreaming(false);
     }
 }
 
 /** 一次性问答(老接口):浏览器不支持流式读取时的退路。 */
 async function answerByText(question) {
+    const op = activeUserOp || beginUserOp();
     const bubble = addBubble('bot thinking', '正在思考…');
     setStreaming(true);
     try {
@@ -1009,19 +1020,22 @@ async function answerByText(question) {
         bubble.className = 'bubble bot';
         bubble.innerHTML = renderAnswer(result);
     } catch (err) {
+        if (err instanceof IdentityChangedError || !opAlive(op)) return;
         bubble.className = 'bubble bot error';
         bubble.textContent = '出错了:' + err.message;
         await fallBackToDefaultConversation(err);
     } finally {
-        setStreaming(false);
+        if (opAlive(op)) setStreaming(false);
     }
 }
 
 /** 图片问答:逐张识别要花时间,这里用"已等待 Ns"当进度(那条链路还没做流式)。 */
 async function answerByImages(filesToSend, question) {
+    const op = activeUserOp || beginUserOp();
     const bubble = addBubble('bot thinking', '正在思考…');
     const startedAt = Date.now();
     const timer = setInterval(() => {
+        if (!opAlive(op)) return;
         const secs = Math.round((Date.now() - startedAt) / 1000);
         bubble.textContent = `正在识别 ${filesToSend.length} 张图…已等待 ${secs}s (大约需要 ${filesToSend.length * 12} 秒)`;
     }, 1000);
@@ -1032,12 +1046,13 @@ async function answerByImages(filesToSend, question) {
         bubble.className = 'bubble bot';
         bubble.innerHTML = renderAnswer(result);
     } catch (err) {
+        if (err instanceof IdentityChangedError || !opAlive(op)) return;
         bubble.className = 'bubble bot error';
         bubble.textContent = '出错了:' + err.message;
         await fallBackToDefaultConversation(err);
     } finally {
         clearInterval(timer);
-        setStreaming(false);
+        if (opAlive(op)) setStreaming(false);
     }
 }
 
