@@ -172,6 +172,7 @@ async function initUserStorage() {
         identityReady = true;
         return true;
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         bumpAuthEpoch();
         document.body.classList.add('identity-invalid');
         return false;
@@ -316,6 +317,7 @@ function katexHtml(tex, display) {
             strict: false,
         });
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         return null;
     }
 }
@@ -376,6 +378,7 @@ function renderRichText(raw) {
             return rendered !== null ? rendered : escapeHtml(m.raw);
         });
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         // 渲染只是"锦上添花":它炸了不能把答案一起炸掉 → 退回纯文本
         console.warn('[renderRichText] 渲染失败,退化成纯文本', e);
         return plainTextHtml(src);
@@ -581,6 +584,7 @@ async function loadConversations(preferredId) {
     try {
         data = await apiJson('/api/conversations');
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         convListEl.textContent = '加载失败:' + e.message;
         return;
     }
@@ -668,6 +672,7 @@ async function loadThread(id) {
         conv = await apiJson('/api/conversations/' + encodeURIComponent(id));
     } catch (e) {
         if (e instanceof IdentityChangedError) return;
+        if (e instanceof IdentityChangedError) return;
         messagesEl.innerHTML = '';
         addBubble('bot error', '聊天记录读不出来:' + escapeHtml(e.message));
         return;
@@ -696,6 +701,7 @@ async function newConversation() {
         await loadThread(created.id);
         questionEl.focus();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('新建对话失败:' + e.message);
     }
 }
@@ -717,6 +723,7 @@ async function renameConversation(conv) {
         });
         await loadConversations(conv.id);
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('重命名失败:' + e.message);
     }
 }
@@ -737,6 +744,7 @@ async function deleteConversation(conv) {
         await loadConversations(currentConversationId);
         await loadThread(currentConversationId);
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('删除失败:' + e.message);
     }
 }
@@ -902,6 +910,7 @@ async function answerByStream(question) {
             renderedLen = answerText.length;
             scrollToBottom();
         } catch (e) {
+        if (e instanceof IdentityChangedError) return;
             console.warn('流式重画失败,继续用纯文本', e);
             renderedLen = answerText.length;                       // 别在同一段上反复撞
         }
@@ -972,7 +981,8 @@ async function answerByStream(question) {
                 try {
                     answerEl.classList.add('rich');
                     answerEl.innerHTML = renderRichText(answerText);
-                } catch (e) { /* 保留半截纯文本 */ }
+                } catch (e) {
+        if (e instanceof IdentityChangedError) return; /* 保留半截纯文本 */ }
             }
             statusEl.textContent = '(已停止生成)';
             statusEl.classList.add('done');
@@ -1079,6 +1089,7 @@ async function loadKnowledge() {
                          <div class="muted small">来源:${sources}</div>
                          <ul class="sample">${sample}</ul>`;
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         box.textContent = '加载失败:' + e.message;
     }
 }
@@ -1119,6 +1130,7 @@ async function loadCoreMemory() {
         coreTextEl.value = data.text || '';
         coreCountEl.textContent = `${(data.text || '').length} / ${data.maxChars}`;
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         coreCountEl.textContent = '读不出来:' + e.message;
     }
 }
@@ -1134,6 +1146,7 @@ async function saveCoreMemory() {
         coreTextEl.value = data.text || '';
         coreCountEl.textContent = `${(data.text || '').length} / ${data.maxChars}`;
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没保存:' + e.message);
     }
 }
@@ -1175,6 +1188,7 @@ async function loadConflicts() {
             memConflictListEl.appendChild(row);
         });
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         memConflictsEl.hidden = true;
     }
 }
@@ -1184,6 +1198,7 @@ async function dismissConflict(c) {
         await apiJson('/api/memory/conflicts/' + encodeURIComponent(c.id), { method: 'DELETE' });
         await loadConflicts();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没忽略:' + e.message);
     }
 }
@@ -1270,6 +1285,7 @@ async function loadMemories() {
         renderMemories(data.memories || []);
         document.getElementById('memoryLabel').textContent = `记忆（${data.count || 0}）`;
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         memListEl.textContent = '读不出来:' + e.message;
     }
 }
@@ -1286,6 +1302,7 @@ async function addMemory() {
         memTextEl.value = '';
         await loadMemories();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没记上:' + e.message);
     }
 }
@@ -1299,6 +1316,7 @@ async function patchMemory(m, body) {
         });
         await loadMemories();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没改成:' + e.message);
     }
 }
@@ -1321,6 +1339,7 @@ async function deleteMemory(m) {
         await apiJson('/api/memory/' + encodeURIComponent(m.id) + '?' + memQuery(), { method: 'DELETE' });
         await loadMemories();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没删掉:' + e.message);
     }
 }
@@ -1336,6 +1355,7 @@ async function loadMemoryScope() {
     try {
         data = await apiJson('/api/conversations');
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         memScopeEl.innerHTML = '';
         memScopeHintEl.textContent = '读不到会话列表:' + e.message;
         return;
@@ -1386,6 +1406,7 @@ memScopeEl.addEventListener('change', async () => {
         await loadMemoryScope();
         await loadMemories();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没改成:' + e.message);
         await loadMemoryScope();
     }
@@ -1430,6 +1451,7 @@ memForgetBtn.addEventListener('click', async () => {
         await apiJson('/api/memory?' + memQuery(), { method: 'DELETE' });
         await loadMemories();
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('没清掉:' + e.message);
     }
 });
@@ -1540,6 +1562,7 @@ async function saveNotes() {
         setHint(`已存入笔记本 ${res.savedCount} 条`
             + (res.skippedCount ? `(跳过重复 ${res.skippedCount} 条)` : ''));
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('存笔记失败:' + e.message);
     }
 }
@@ -1551,6 +1574,7 @@ async function openNotebook() {
         const data = await apiJson('/api/notes');
         renderNoteList(data.notes || []);
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         noteListEl.innerHTML = '<p class="muted small">读不出来:' + escapeHtml(e.message) + '</p>';
     }
 }
@@ -1606,6 +1630,7 @@ async function openNote(id) {
             + `<p class="muted small">存于 ${formatTime(n.savedAt)}</p>`
             + (answers || '<p class="muted small">这条问题当时还没有回答。</p>');
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         noteDetailEl.innerHTML = '<p class="muted small">读不出来:' + escapeHtml(e.message) + '</p>';
     }
 }
@@ -1620,6 +1645,7 @@ async function deleteNoteById(id) {
         if (currentNoteId === id) closeNote();      // 正开着它的详情就一并关掉
         await openNotebook();                       // 列表立即刷新
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         window.alert('删除失败:' + e.message);
     }
 }
