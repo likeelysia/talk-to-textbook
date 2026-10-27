@@ -35,7 +35,8 @@ with sync_playwright() as pw:
     while time.monotonic() < until:
         with urllib.request.urlopen(info['streamState'], timeout=5) as r:
             state = json.loads(r.read().decode('utf-8'))
-        if state.get('wait_returned') is not None:
+        if state.get('wait_returned') is True and (
+                state.get('done_sent') is True or state.get('client_cancelled') is True):
             break
         time.sleep(0.05)
     rec('S4_old_stream_release_observed',
