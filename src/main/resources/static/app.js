@@ -119,9 +119,13 @@ let currentConversationId = null;
 let authEpoch = 0;
 let authUserId = null;
 let identityReady = false;
+class IdentityChangedError extends Error {
+    constructor() { super('身份已切换，丢弃旧结果'); this.name = 'IdentityChangedError'; }
+}
 
 function clearPrivateDom() {
-    for (const id of ['messages','convList','kb','thumbs','previews','imgCount','question']) {
+    for (const id of ['messages','convList','kb','thumbs','previews','imgCount','question',
+        'coreText','memList','noteList','noteDetail']) {
         const el = document.getElementById(id);
         if (el) {
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = '';
@@ -132,6 +136,13 @@ function clearPrivateDom() {
         if (el.closest('.desk-actions')) return;
         el.disabled = true;
     });
+    for (const id of ['memoryModal','notebookModal','noteModal']) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
+    }
+    noteSelectMode = false;
+    noteSelected.clear();
+    currentNoteId = null;
     document.body.classList.add('identity-invalid');
 }
 
@@ -146,10 +157,12 @@ function bumpAuthEpoch(redirect = false) {
 }
 
 async function initUserStorage() {
+    const startEpoch = authEpoch;
     try {
         const res = await window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}});
         if (!res.ok) throw new Error('身份确认失败');
         const me = await res.json();
+        if (startEpoch !== authEpoch) return false;
         if (!me.authenticated || !me.userId) throw new Error('身份未确认');
         authUserId = me.userId;
         CONV_STORAGE_KEY = 'fa.conversationId.' + authUserId;
@@ -522,11 +535,11 @@ async function authFetch(url, options) {
             opts.headers = Object.assign({}, opts.headers || {}, { 'X-XSRF-TOKEN': token });
         }
     }
-    if (!identityReady) throw new Error('身份未确认，禁止发送私人请求');
+    if (!identityReady) throw new IdentityChangedError();
     const epochAtStart = authEpoch;
     const res = await window.fetch(url, opts);
     if (epochAtStart !== authEpoch || !identityReady) {
-        throw new Error('身份已切换，丢弃旧响应');
+        throw new IdentityChangedError();
     }
     res.__authEpoch = epochAtStart;
     if (res.status === 401) {
@@ -558,7 +571,7 @@ async function apiJson(url, options) {
     const res = await authFetch(url, options);
     if (!res.ok) throw new Error(await readError(res));
     const data = await res.json();
-    if (res.__authEpoch !== authEpoch) throw new Error('身份已切换，丢弃旧响应');
+    if (res.__authEpoch !== authEpoch) throw new IdentityChangedError();
     return data;
 }
 
@@ -654,6 +667,7 @@ async function loadThread(id) {
     try {
         conv = await apiJson('/api/conversations/' + encodeURIComponent(id));
     } catch (e) {
+        if (e instanceof IdentityChangedError) return;
         messagesEl.innerHTML = '';
         addBubble('bot error', '聊天记录读不出来:' + escapeHtml(e.message));
         return;
@@ -1032,13 +1046,11 @@ stopBtn.addEventListener('click', () => {
 /* ---------------- 两个接口调用 ---------------- */
 
 async function askText(question) {
-    const res = await authFetch('/api/agent', {
+    return apiJson('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, conversationId: currentConversationId })
     });
-    if (!res.ok) throw new Error(await readError(res));
-    return res.json();
 }
 
 async function askImages(files, question) {
@@ -1050,7 +1062,9 @@ async function askImages(files, question) {
     //       浏览器会自动带上 multipart 的 boundary
     const res = await authFetch('/api/agent', { method: 'POST', body: fd });
     if (!res.ok) throw new Error(await readError(res));
-    return res.json();
+    const data = await res.json();
+    if (res.__authEpoch !== authEpoch) throw new IdentityChangedError();
+    return data;
 }
 
 /* ---------------- 知识库概览 ---------------- */
@@ -1631,9 +1645,35 @@ document.querySelectorAll('form[action="/logout"]').forEach(form => {
         if (streamCtrl) streamCtrl.abort();
     });
 });
+async function recheckIdentity() {
+    const startEpoch = authEpoch;
+    identityReady = false;
+    clearPrivateDom();
+    try {
+        const r = await window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}});
+        const me = r.ok ? await r.json() : null;
+        if (startEpoch !== authEpoch) return;
+        if (!me || !me.authenticated || me.userId !== authUserId) {
+            bumpAuthEpoch(true);
+            return;
+        }
+        document.body.classList.remove('identity-invalid');
+        identityReady = true;
+    } catch (_) {
+        if (startEpoch === authEpoch) bumpAuthEpoch(true);
+    }
+}
 window.addEventListener('pageshow', (event) => {
     if (!identityReady) return;
     if (event.persisted || document.visibilityState === 'visible') {
+        recheckIdentity();
+    }
+});
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && identityReady) recheckIdentity();
+});
+(function unusedOldPageshow() {
+    if (false) {
         window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}})
             .then(r => r.ok ? r.json() : null)
             .then(me => {
