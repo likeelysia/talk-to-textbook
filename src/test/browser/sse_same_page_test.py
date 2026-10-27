@@ -1,11 +1,11 @@
-import json, time, urllib.request
+import json, os, time, urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(r'F:\JAVA__PROJECT\talk-to-textbook')
-info = json.loads((ROOT / 'target/browser-fixture.json').read_text(encoding='utf-8'))
+info = json.loads(Path(os.environ.get('BROWSER_INFO', str(ROOT / 'target/browser-fixture.json'))).read_text(encoding='utf-8'))
 BASE, PW, CONTROL = info['base'], info['password'], info['control']
-OUT = ROOT / 'target/browser-evidence'; OUT.mkdir(exist_ok=True)
+OUT = Path(os.environ.get('BROWSER_OUT', str(ROOT / 'target/browser-evidence'))); OUT.mkdir(parents=True, exist_ok=True)
 results = []
 def rec(n, p, d=None): results.append({'name': n, 'passed': bool(p), 'detail': d or {}})
 
@@ -55,6 +55,6 @@ with sync_playwright() as pw:
         rec('S5_B_can_ask_after_release', False, {'error': type(e).__name__, 'body': p.inner_text('body')[-300:]})
     p.screenshot(path=str(OUT / 'B-after-same-page-slow-sse.png'), full_page=True)
     b.close()
-(ROOT / 'target/slow-sse-same-page-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')
+(Path(os.environ.get('BROWSER_RESULTS', str(ROOT / 'target'))) / 'slow-sse-same-page-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(results, ensure_ascii=False, indent=2))
 if not all(x['passed'] for x in results): raise SystemExit(1)

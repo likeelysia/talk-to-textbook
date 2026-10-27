@@ -3,8 +3,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.cookiejar, json, os, secrets, socket, subprocess, sys, threading, time
 import urllib.request, urllib.error, urllib.parse
 
-ROOT = Path(r'F:\JAVA__PROJECT\talk-to-textbook')
-RUNTIME = Path(r'F:\JAVA__PROJECT\talk-to-textbook\target\browser-fixture')
+ROOT = Path(os.environ.get('PROJECT_ROOT', r'F:\JAVA__PROJECT\talk-to-textbook'))
+RUNTIME = Path(os.environ.get('BROWSER_RUN_DIR', str(ROOT / 'target/browser-fixture')))
+INFO_PATH = Path(os.environ.get('BROWSER_INFO', str(ROOT / 'target/browser-fixture.json')))
 if RUNTIME.exists():
     import shutil; shutil.rmtree(RUNTIME)
 (RUNTIME / 'data/memory').mkdir(parents=True)
@@ -108,6 +109,9 @@ env = {k: v for k, v in os.environ.items() if not k.startswith(('FA_', 'SPRING_'
 log = open(RUNTIME / 'app.log', 'w', encoding='utf-8')
 proc = subprocess.Popen(args, cwd=RUNTIME, env=env, stdout=log, stderr=subprocess.STDOUT,
                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+(RUNTIME / 'java.pid').write_text(str(proc.pid), encoding='ascii')
+if os.environ.get('FIXTURE_FAIL_AFTER_START') == '1':
+    raise RuntimeError('synthetic fixture failure after child start')
 try:
     for _ in range(120):
         if proc.poll() is not None: raise RuntimeError('app exited ' + str(proc.returncode))
@@ -121,7 +125,8 @@ try:
         code, body = admin.req('/api/admin/accounts', 'POST', dict(username=name, password=password, role='USER'))
         assert code == 200, (code, body)
     info = {'base': base, 'control': 'http://127.0.0.1:' + str(fake.server_port) + '/release', 'streamState': 'http://127.0.0.1:' + str(fake.server_port) + '/stream-state', 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}
-    (ROOT / 'target/browser-fixture.json').write_text(json.dumps(info), encoding='utf-8')
+    INFO_PATH.parent.mkdir(parents=True, exist_ok=True)
+    INFO_PATH.write_text(json.dumps(info), encoding='utf-8')
     print(json.dumps({'ready': True, 'base': base, 'runtime': str(RUNTIME)}), flush=True)
     while True: time.sleep(60)
 except BaseException as e:

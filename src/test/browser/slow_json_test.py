@@ -1,10 +1,10 @@
-import json,time,threading,http.client,urllib.parse
+import json,os,time,threading,http.client,urllib.parse
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from playwright.sync_api import sync_playwright
 
 root=Path(r'F:\JAVA__PROJECT\talk-to-textbook')
-info=json.loads((root/'target/browser-fixture.json').read_text())
+info=json.loads(Path(os.environ.get('BROWSER_INFO', str(root/'target/browser-fixture.json'))).read_text())
 backend=info['base']; upstream=urllib.parse.urlsplit(backend)
 marker='A_SLOW_CORE_MARKER'; release=threading.Event(); lock=threading.Lock()
 gate={'armed':False,'prefix_sent':False,'body_complete':False,'released':False}
@@ -90,7 +90,8 @@ with sync_playwright() as pw:
         page.click('#closeMemory');page.fill('#question','B_CAN_ASK_AFTER_SLOW_JSON');page.click('#send')
         page.wait_for_selector('text=SYNTHETIC_STREAM_ANSWER',timeout=15000);page.wait_for_selector('#send:not([disabled])')
         rec('B_can_ask_and_receive_answer_after_old_json_release',True)
-        page.screenshot(path=str(root/'target/browser-evidence/B-after-slow-json.png'))
+        OUT=Path(os.environ.get('BROWSER_OUT', str(root/'target/browser-evidence'))); OUT.mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(OUT/'B-after-slow-json.png'))
     except Exception as e:
         rec('slow_json_execution',False,stage=stage,error_type=type(e).__name__,message=str(e).replace(info['password'],'[redacted]')[:800])
         try:page.screenshot(path=str(root/'target/browser-evidence/slow-json-failure.png'))
@@ -99,6 +100,6 @@ with sync_playwright() as pw:
         release.set();browser.close();server.shutdown();server.server_close()
 (root/'proxy-events.json').write_text(json.dumps(events,indent=2),encoding='utf-8')
 (root/'gate-state.json').write_text(json.dumps(gate,indent=2),encoding='utf-8')
-(root/'target/slow-json-results.json').write_text(json.dumps({'base':public,'results':results},indent=2),encoding='utf-8')
+(Path(os.environ.get('BROWSER_RESULTS', str(root/'target')))/'slow-json-results.json').write_text(json.dumps({'base':public,'results':results},indent=2),encoding='utf-8')
 print(json.dumps(results,indent=2))
 if not results or not all(x['passed'] for x in results):raise SystemExit(1)
