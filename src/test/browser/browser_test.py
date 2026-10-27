@@ -98,10 +98,18 @@ with sync_playwright() as pw:
     sb.click('button[type=submit]')
     sb.wait_for_url('**/study.html', timeout=15000)
     import urllib.request
-    urllib.request.urlopen(BASE + '/release', timeout=5).read()
+    ctrl = info.get('control')
+    assert ctrl, 'fixture did not expose model control URL'
+    with urllib.request.urlopen(ctrl, timeout=5) as r:
+        released = json.loads(r.read().decode('utf-8'))
+    assert released.get('released') is True, released
     sb.wait_for_timeout(2000)
-    rec('sse_identity_switch_does_not_leak_into_B', 'SYNTHETIC_SLOW_FIRST' not in sb.inner_text('body'), {'url': sb.url})
+    rec('sse_identity_switch_does_not_leak_into_B', 'SYNTHETIC_SLOW_FIRST' not in sb.inner_text('body'), {'url': sb.url, 'released': released})
+    sa.reload(wait_until='domcontentloaded')
+    sa.wait_for_timeout(1000)
+    rec('old_sse_page_reloads_without_A_marker', 'SYNTHETIC_SLOW_FIRST' not in sa.inner_text('body'), {'url': sa.url})
     sb.screenshot(path=str(OUT / 'B-after-slow-sse.png'), full_page=True)
+    sa.screenshot(path=str(OUT / 'A-after-slow-sse.png'), full_page=True)
     s_ctx.close()
 
     browser.close()

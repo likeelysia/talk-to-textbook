@@ -17,7 +17,8 @@ class Fake(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/release':
             release.set()
-            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+            self.send_response(200); self.send_header('Content-Type', 'application/json')
+            self.end_headers(); self.wfile.write(b'{"released":true}')
             return
         self.send_response(404); self.end_headers()
 
@@ -103,7 +104,7 @@ try:
     for name in ('review_A', 'review_B'):
         code, body = admin.req('/api/admin/accounts', 'POST', dict(username=name, password=password, role='USER'))
         assert code == 200, (code, body)
-    info = {'base': base, 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}
+    info = {'base': base, 'control': 'http://127.0.0.1:' + str(fake.server_port) + '/release', 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}
     (ROOT / 'target/browser-fixture.json').write_text(json.dumps(info), encoding='utf-8')
     print(json.dumps({'ready': True, 'base': base, 'runtime': str(RUNTIME)}), flush=True)
     while True: time.sleep(60)
