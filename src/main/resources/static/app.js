@@ -803,7 +803,7 @@ formEl.addEventListener('submit', async (e) => {
             await answerByStream(question);
         }
     } finally {
-        loadConversations(currentConversationId);      // 首条提问会自动改标题,刷新一下列表
+        if (opAlive(submitOp)) loadConversations(currentConversationId);      // 首条提问会自动改标题,刷新一下列表
     }
 });
 
