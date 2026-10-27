@@ -35,7 +35,8 @@ try:
     print(f'SUITE slow_json={a} sse_same_page={b} exit={exit_code}', flush=True)
 finally:
     if fixture.poll() is None:
-        fixture.terminate()
+        subprocess.call(['taskkill', '/PID', str(fixture.pid), '/T', '/F'],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             fixture.wait(timeout=15)
         except subprocess.TimeoutExpired:
