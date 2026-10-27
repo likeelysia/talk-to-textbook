@@ -120,10 +120,29 @@ let authEpoch = 0;
 let authUserId = null;
 let identityReady = false;
 
-function bumpAuthEpoch() {
+function clearPrivateDom() {
+    for (const id of ['messages','convList','kb','thumbs','previews','imgCount','question']) {
+        const el = document.getElementById(id);
+        if (el) {
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = '';
+            else el.replaceChildren();
+        }
+    }
+    document.querySelectorAll('button, input, textarea, form').forEach(el => {
+        if (el.closest('.desk-actions')) return;
+        el.disabled = true;
+    });
+    document.body.classList.add('identity-invalid');
+}
+
+function bumpAuthEpoch(redirect = false) {
     authEpoch++;
     identityReady = false;
     authUserId = null;
+    if (streamCtrl) streamCtrl.abort();
+    streamCtrl = null;
+    clearPrivateDom();
+    if (redirect) redirectToLogin();
 }
 
 async function initUserStorage() {
@@ -503,11 +522,13 @@ async function authFetch(url, options) {
             opts.headers = Object.assign({}, opts.headers || {}, { 'X-XSRF-TOKEN': token });
         }
     }
+    if (!identityReady) throw new Error('身份未确认，禁止发送私人请求');
     const epochAtStart = authEpoch;
     const res = await window.fetch(url, opts);
     if (epochAtStart !== authEpoch || !identityReady) {
         throw new Error('身份已切换，丢弃旧响应');
     }
+    res.__authEpoch = epochAtStart;
     if (res.status === 401) {
         redirectToLogin();
         throw new Error('登录已过期，请重新登录');
@@ -536,7 +557,9 @@ function ensureLogoutCsrf() {
 async function apiJson(url, options) {
     const res = await authFetch(url, options);
     if (!res.ok) throw new Error(await readError(res));
-    return res.json();
+    const data = await res.json();
+    if (res.__authEpoch !== authEpoch) throw new Error('身份已切换，丢弃旧响应');
+    return data;
 }
 
 /** 拉会话列表;preferredId 不存在(比如删掉了)就回落到默认会话。 */
@@ -778,6 +801,7 @@ function parseSseEvent(raw) {
 
 /** 逐块读响应体,按空行切出事件,喂给 onEvent(name, data)。 */
 async function readSse(body, onEvent) {
+    const sseEpoch = authEpoch;
     const reader = body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buf = '';
@@ -789,11 +813,13 @@ async function readSse(body, onEvent) {
         while ((idx = buf.indexOf('\n\n')) >= 0) {
             const ev = parseSseEvent(buf.slice(0, idx));
             buf = buf.slice(idx + 2);
+            if (sseEpoch !== authEpoch) throw new Error('身份已切换，停止旧流');
             if (ev) onEvent(ev.name, ev.data);
         }
     }
     if (buf.trim()) {                                   // 收尾那一条可能没跟空行
         const ev = parseSseEvent(buf);
+        if (sseEpoch !== authEpoch) throw new Error('身份已切换，停止旧流');
         if (ev) onEvent(ev.name, ev.data);
     }
 }
@@ -943,8 +969,10 @@ async function answerByStream(question) {
         await fallBackToDefaultConversation(err);
     } finally {
         cancelRender();
-        streamCtrl = null;
-        setStreaming(false);
+        if (streamCtrl === ctrl) {
+            streamCtrl = null;
+            setStreaming(false);
+        }
     }
 }
 
@@ -1604,17 +1632,16 @@ document.querySelectorAll('form[action="/logout"]').forEach(form => {
     });
 });
 window.addEventListener('pageshow', (event) => {
+    if (!identityReady) return;
     if (event.persisted || document.visibilityState === 'visible') {
         window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}})
             .then(r => r.ok ? r.json() : null)
             .then(me => {
                 if (!me || !me.authenticated || me.userId !== authUserId) {
-                    bumpAuthEpoch();
-                    document.body.classList.add('identity-invalid');
-                    redirectToLogin();
+                    bumpAuthEpoch(true);
                 }
-            }).catch(() => {});
+            }).catch(() => bumpAuthEpoch(true));
     }
 });
 loadKnowledge();
-initUserStorage().then(ok => { if (ok) initConversations(); else redirectToLogin(); });
+initUserStorage().then(ok => { if (ok) initConversations(); else bumpAuthEpoch(true); });
