@@ -30,6 +30,18 @@ with sync_playwright() as pw:
     with urllib.request.urlopen(CONTROL, timeout=5) as r:
         released = json.loads(r.read().decode('utf-8'))
     rec('S3_release_control_confirmed', released.get('released') is True, released)
+    state = None
+    until = time.monotonic() + 5
+    while time.monotonic() < until:
+        with urllib.request.urlopen(info['streamState'], timeout=5) as r:
+            state = json.loads(r.read().decode('utf-8'))
+        if state.get('wait_returned') is not None:
+            break
+        time.sleep(0.05)
+    rec('S4_old_stream_release_observed',
+        bool(state) and state.get('wait_returned') is True
+        and (state.get('done_sent') is True or state.get('client_cancelled') is True),
+        state or {})
     p.wait_for_timeout(1500)
     rec('S5_B_no_old_delta', 'SYNTHETIC_SLOW_FIRST' not in p.inner_text('body'), {'url': p.url})
     p.fill('#question', 'B_AFTER_RELEASE')

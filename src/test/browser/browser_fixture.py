@@ -20,6 +20,11 @@ class Fake(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header('Content-Type', 'application/json')
             self.end_headers(); self.wfile.write(b'{"released":true}')
             return
+        if self.path == '/stream-state':
+            raw = json.dumps(stream_state).encode()
+            self.send_response(200); self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
+            return
         self.send_response(404); self.end_headers()
 
     def do_POST(self):
@@ -31,19 +36,30 @@ class Fake(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw); return
         if b.get('stream'):
             slow = 'SLOW_SSE' in json.dumps(b, ensure_ascii=False)
+            if slow:
+                stream_state.update(wait_returned=None, done_sent=False, client_cancelled=False)
             first = 'SYNTHETIC_SLOW_FIRST' if slow else 'SYNTHETIC_STREAM_ANSWER'
             self.send_response(200); self.send_header('Content-Type', 'text/event-stream')
             self.end_headers()
             self.wfile.write(('data: {"choices":[{"delta":{"content":"%s"}}]}\n\n' % first).encode())
             self.wfile.flush()
             if slow:
-                release.wait(20)
-            self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush(); return
+                released = release.wait(20)
+                stream_state['wait_returned'] = released
+                if not released:
+                    return
+            try:
+                self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
+                if slow: stream_state['done_sent'] = True
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                if slow: stream_state['client_cancelled'] = True
+            return
         data = {'choices': [{'message': {'role': 'assistant', 'content': 'SYNTHETIC_MODEL_ANSWER', 'tool_calls': []}, 'finish_reason': 'stop'}]}
         raw = json.dumps(data).encode(); self.send_response(200)
         self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw)
 
 release = threading.Event()
+stream_state = {'wait_returned': None, 'done_sent': False, 'client_cancelled': False}
 fake = ThreadingHTTPServer(('127.0.0.1', 0), Fake)
 threading.Thread(target=fake.serve_forever, daemon=True).start()
 with socket.socket() as s:
@@ -104,7 +120,7 @@ try:
     for name in ('review_A', 'review_B'):
         code, body = admin.req('/api/admin/accounts', 'POST', dict(username=name, password=password, role='USER'))
         assert code == 200, (code, body)
-    info = {'base': base, 'control': 'http://127.0.0.1:' + str(fake.server_port) + '/release', 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}
+    info = {'base': base, 'control': 'http://127.0.0.1:' + str(fake.server_port) + '/release', 'streamState': 'http://127.0.0.1:' + str(fake.server_port) + '/stream-state', 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}
     (ROOT / 'target/browser-fixture.json').write_text(json.dumps(info), encoding='utf-8')
     print(json.dumps({'ready': True, 'base': base, 'runtime': str(RUNTIME)}), flush=True)
     while True: time.sleep(60)
