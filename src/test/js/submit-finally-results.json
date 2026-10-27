@@ -1,0 +1,17 @@
+{
+  "method": "verbatim actual submit handler, controlled inner image operation, shared reload spy; not a real browser test",
+  "results": [
+    {
+      "test": "old_outer_submit_finally_does_not_reload_new_identity",
+      "passed": true,
+      "loadConversations_calls": []
+    },
+    {
+      "test": "normal_outer_submit_still_refreshes_conversations",
+      "passed": true,
+      "loadConversations_calls": [
+        "default"
+      ]
+    }
+  ]
+}

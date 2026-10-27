@@ -1,0 +1,97 @@
+{
+  "source_commit": "52f42d4",
+  "method": "Node VM executes verbatim selected app.js functions with controlled deferred responses and minimal DOM substitutes; not a real browser test",
+  "results": [
+    {
+      "test": "identity_invalid_blocks_request_before_send",
+      "passed": true,
+      "requests_sent": 0
+    },
+    {
+      "test": "changed_epoch_rejects_late_headers",
+      "passed": true
+    },
+    {
+      "test": "old_json_body_cannot_render_after_switch",
+      "passed": true,
+      "old_history_rendered": 0
+    },
+    {
+      "test": "old_sse_cannot_render_after_epoch_change",
+      "passed": true,
+      "old_stream_wrote_to_node": false
+    },
+    {
+      "test": "old_finally_preserves_new_stream_controller",
+      "passed": true,
+      "new_stream_controller_preserved": true
+    },
+    {
+      "test": "initial_pageshow_does_not_redirect_valid_pending_identity",
+      "passed": true,
+      "redirects": 0,
+      "identity_ready_after_init": true
+    },
+    {
+      "test": "failed_restore_validation_keeps_private_state_inactive",
+      "passed": true,
+      "identity_ready": false,
+      "old_private_dom_retained": false
+    },
+    {
+      "test": "old_json_error_does_not_erase_new_identity_dom",
+      "passed": true,
+      "new_history_preserved": true
+    },
+    {
+      "test": "old_identity_init_cannot_reactivate_after_invalidation",
+      "passed": true,
+      "identity_ready": false,
+      "user_id": null
+    },
+    {
+      "test": "invalidation_clears_core_and_open_note",
+      "passed": true,
+      "core_retained": false,
+      "note_retained": false,
+      "note_modal_still_open": false
+    },
+    {
+      "test": "pending_restore_validation_pauses_private_state",
+      "passed": true,
+      "identity_ready_while_pending": false,
+      "old_dom_retained_while_pending": false
+    },
+    {
+      "test": "old_image_json_rejected_after_identity_change",
+      "passed": true,
+      "old_image_answer_returned": false
+    },
+    {
+      "test": "same_identity_restore_reenables_private_controls",
+      "passed": true,
+      "identity_ready": true,
+      "send_disabled": false,
+      "input_disabled": false
+    },
+    {
+      "test": "old_json_cannot_repaint_during_pending_identity_recheck",
+      "passed": true,
+      "old_render_while_identity_not_ready": false,
+      "identity_ready_when_rendered": false
+    },
+    {
+      "test": "old_core_error_does_not_overwrite_new_identity_state",
+      "passed": true,
+      "new_core_count_preserved": true
+    },
+    {
+      "test": "normal_image_json_still_succeeds",
+      "passed": true
+    },
+    {
+      "test": "normal_initial_identity_still_succeeds",
+      "passed": true
+    }
+  ]
+}

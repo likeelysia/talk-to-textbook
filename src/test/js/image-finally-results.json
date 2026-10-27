@@ -1,0 +1,6 @@
+{
+  "test": "old_image_finally_does_not_reset_new_request_controls",
+  "passed": true,
+  "late_shared_setStreaming_calls": [],
+  "method": "actual answerByImages and askImages functions; controlled body, minimal DOM, shared state setter spy; not a browser test"
+}
