@@ -98,8 +98,8 @@ with sync_playwright() as pw:
         except Exception:pass
     finally:
         release.set();browser.close();server.shutdown();server.server_close()
-(root/'proxy-events.json').write_text(json.dumps(events,indent=2),encoding='utf-8')
-(root/'gate-state.json').write_text(json.dumps(gate,indent=2),encoding='utf-8')
+(Path(os.environ.get('BROWSER_RESULTS', str(root/'target')))/'proxy-events.json').write_text(json.dumps(events,indent=2),encoding='utf-8')
+(Path(os.environ.get('BROWSER_RESULTS', str(root/'target')))/'gate-state.json').write_text(json.dumps(gate,indent=2),encoding='utf-8')
 (Path(os.environ.get('BROWSER_RESULTS', str(root/'target')))/'slow-json-results.json').write_text(json.dumps({'base':public,'results':results},indent=2),encoding='utf-8')
 print(json.dumps(results,indent=2))
 if not results or not all(x['passed'] for x in results):raise SystemExit(1)
