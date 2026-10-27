@@ -116,14 +116,34 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !uiModal
 /** 当前会话 id:存在 localStorage,刷新页面还停在原来那个框 */
 let CONV_STORAGE_KEY = 'fa.conversationId';
 let currentConversationId = null;
+let authEpoch = 0;
+let authUserId = null;
+let identityReady = false;
+
+function bumpAuthEpoch() {
+    authEpoch++;
+    identityReady = false;
+    authUserId = null;
+}
+
 async function initUserStorage() {
     try {
-        const me = await apiJson('/api/auth/me');
-        const id = me.userId || me.username || 'anon';
-        CONV_STORAGE_KEY = 'fa.conversationId.' + id;
+        const res = await window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}});
+        if (!res.ok) throw new Error('身份确认失败');
+        const me = await res.json();
+        if (!me.authenticated || !me.userId) throw new Error('身份未确认');
+        authUserId = me.userId;
+        CONV_STORAGE_KEY = 'fa.conversationId.' + authUserId;
         currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
         localStorage.removeItem('fa.conversationId');
-    } catch (_) {}
+        authEpoch++;
+        identityReady = true;
+        return true;
+    } catch (e) {
+        bumpAuthEpoch();
+        document.body.classList.add('identity-invalid');
+        return false;
+    }
 }
 let defaultConversationId = 'default';
 
@@ -483,7 +503,11 @@ async function authFetch(url, options) {
             opts.headers = Object.assign({}, opts.headers || {}, { 'X-XSRF-TOKEN': token });
         }
     }
+    const epochAtStart = authEpoch;
     const res = await window.fetch(url, opts);
+    if (epochAtStart !== authEpoch || !identityReady) {
+        throw new Error('身份已切换，丢弃旧响应');
+    }
     if (res.status === 401) {
         redirectToLogin();
         throw new Error('登录已过期，请重新登录');
@@ -1573,5 +1597,24 @@ document.addEventListener('keydown', (e) => {
 });
 
 ensureLogoutCsrf();
+document.querySelectorAll('form[action="/logout"]').forEach(form => {
+    form.addEventListener('submit', () => {
+        bumpAuthEpoch();
+        if (streamCtrl) streamCtrl.abort();
+    });
+});
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted || document.visibilityState === 'visible') {
+        window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}})
+            .then(r => r.ok ? r.json() : null)
+            .then(me => {
+                if (!me || !me.authenticated || me.userId !== authUserId) {
+                    bumpAuthEpoch();
+                    document.body.classList.add('identity-invalid');
+                    redirectToLogin();
+                }
+            }).catch(() => {});
+    }
+});
 loadKnowledge();
-initUserStorage().finally(() => initConversations());
+initUserStorage().then(ok => { if (ok) initConversations(); else redirectToLogin(); });
