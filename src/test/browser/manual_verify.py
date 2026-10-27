@@ -47,7 +47,7 @@ try:
         login(a, 'review_A')
         token = a.request.get(BASE + '/api/auth/csrf').json()['token']
         seeded = a.request.put(BASE + '/api/memory/core', data={'text': 'A_MANUAL_PRIVATE_MARKER'},
-                               headers={'X-XSRF-TOKEN': token})
+                               headers={'X-XSRF-TOKEN': token, 'X-Expected-User-Id': a.evaluate('authUserId')})
         assert seeded.ok, seeded.status
         a.click('#openMemory')
         a.wait_for_function("document.querySelector('#coreText') && document.querySelector('#coreText').value === 'A_MANUAL_PRIVATE_MARKER'", timeout=10000)

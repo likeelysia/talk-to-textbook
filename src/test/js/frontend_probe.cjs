@@ -23,7 +23,7 @@ function setup(fetch) {
     setStreaming:value=>writes.push({streaming:value}),renderAnswer:x=>JSON.stringify(x),renderRichText:x=>x,scrollToBottom(){},
     fallBackToDefaultConversation:async()=>writes.push({fallback:true}),STREAM_RENDER_THROTTLE_MS:150,STREAM_RENDER_MIN_CHARS:12});
   const identityClass=source.match(/^class IdentityChangedError[^]*?^}/m);if(!identityClass)throw new Error('Missing identity error class');vm.runInContext(identityClass[0],c);
-  for(const name of ['beginUserOp','opAlive','clearPrivateDom','bumpAuthEpoch','initUserStorage','authFetch','apiJson','loadThread','parseSseEvent','readSse','countOf','safeToRenderPartial','answerByStream','askText','askImages','recheckIdentity','loadCoreMemory']) vm.runInContext(fn(name),c);
+  for(const name of ['beginUserOp','opAlive','clearPrivateDom','bumpAuthEpoch','notifyAuthChange','initUserStorage','authFetch','apiJson','loadThread','parseSseEvent','readSse','countOf','safeToRenderPartial','answerByStream','askText','askImages','recheckIdentity','loadCoreMemory']) vm.runInContext(fn(name),c);
   const begin=source.indexOf("window.addEventListener('pageshow'");
   const end=source.indexOf('\nloadKnowledge();',begin);
   if(begin<0 || end<0)throw new Error('Missing pageshow source');

@@ -71,7 +71,7 @@ with sync_playwright() as pw:
         context.add_init_script('''(() => {window.__slowHeaders=false;const original=window.fetch.bind(window);window.fetch=(...args)=>original(...args).then(r=>{if(String(args[0]).startsWith('/api/memory/core'))window.__slowHeaders=true;return r;});})();''')
         page=context.new_page();stage='A_login';login(page,'review_A');trace('A_logged_in')
         token=page.request.get(public+'/api/auth/csrf').json()['token']
-        seeded=page.request.put(public+'/api/memory/core',data={'text':marker},headers={'X-XSRF-TOKEN':token});assert seeded.ok
+        seeded=page.request.put(public+'/api/memory/core',data={'text':marker},headers={'X-XSRF-TOKEN':token,'X-Expected-User-Id':page.evaluate('authUserId')});assert seeded.ok
         with lock:gate['armed']=True
         stage='partial_json_headers';page.click('#openMemory')
         page.wait_for_function('window.__slowHeaders===true',timeout=10000)

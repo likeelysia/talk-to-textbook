@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(r'F:\JAVA__PROJECT\talk-to-textbook')
 info = json.loads(Path(os.environ.get('BROWSER_INFO', str(ROOT / 'target/browser-fixture.json'))).read_text(encoding='utf-8'))
 BASE, PW = info['base'], info['password']
-OUT = ROOT / 'target/browser-evidence'; OUT.mkdir(exist_ok=True)
+OUT = Path(os.environ.get('BROWSER_OUT', str(ROOT / 'target/browser-evidence'))); OUT.mkdir(parents=True, exist_ok=True)
 res = []
 def rec(n, p, d=None): res.append({'name': n, 'passed': bool(p), 'detail': d or {}})
 def login(page, u):
@@ -46,6 +46,6 @@ with sync_playwright() as pw:
     bcore = btab.request.get(BASE + '/api/memory/core').json().get('text', '')
     rec('B_core_unchanged', 'OLD_A_SHOULD_NOT_WRITE' not in bcore, {'core': bcore})
     b.close()
-(ROOT / 'target/expected-user-results.json').write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding='utf-8')
+(Path(os.environ.get('BROWSER_RESULTS', str(ROOT / 'target'))) / 'expected-user-results.json').write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(res, ensure_ascii=False, indent=2))
 if not all(x['passed'] for x in res): raise SystemExit(1)
