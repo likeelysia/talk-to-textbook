@@ -42,6 +42,84 @@ class JsonKnowledgeStoreTest {
 
     private JsonKnowledgeStore store;
 
+    @Test
+    @DisplayName("正文序列化中断：旧文件和可查询内容都保留，重启仍可读取")
+    void failedKnowledgeWritePreservesDiskAndMemory() throws Exception {
+        AtomicBoolean fail = new AtomicBoolean();
+        ObjectMapper guarded = new ObjectMapper();
+        var module = new com.fasterxml.jackson.databind.module.SimpleModule();
+        module.addSerializer(KnowledgeItem.class, new com.fasterxml.jackson.databind.ser.std.StdSerializer<KnowledgeItem>(KnowledgeItem.class) {
+            @Override public void serialize(KnowledgeItem value, com.fasterxml.jackson.core.JsonGenerator out,
+                    com.fasterxml.jackson.databind.SerializerProvider provider) throws java.io.IOException {
+                if (fail.get()) throw new java.io.IOException("synthetic interrupted knowledge write");
+                out.writeStartObject();
+                out.writeStringField("id", value.id()); out.writeStringField("name", value.name());
+                out.writeStringField("detail", value.detail()); out.writeStringField("source", value.source());
+                out.writeStringField("location", value.location()); out.writeStringField("type", value.type());
+                out.writeEndObject();
+            }
+        });
+        guarded.registerModule(module);
+        JsonKnowledgeStore guardedStore = new JsonKnowledgeStore(guarded, FAKE, file.toString(), 0);
+        KnowledgeItem original = item("old", "位移", "旧正文");
+        guardedStore.addAll(List.of(original));
+        byte[] before = Files.readAllBytes(file);
+        fail.set(true);
+        assertThrows(AgentException.class, () -> guardedStore.addAll(List.of(item("new", "线程", "新正文"))));
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(file)), "失败不能截断旧文件");
+        assertEquals(List.of(original), guardedStore.all(), "未落盘内容不能提前发布到查询");
+        assertEquals(List.of(original), new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0).all());
+        try (var files = Files.list(tmp)) {
+            assertTrue(files.noneMatch(p -> p.getFileName().toString().endsWith(".tmp")));
+        }
+    }
+
+    @Test
+    @DisplayName("同 ID 正文变化后旧向量失效，重新补齐及重启都使用新向量")
+    void updatedTextInvalidatesPersistedVector() throws Exception {
+        store.addAll(List.of(item("same", "位移", "位置差")));
+        store.backfillVectors(10);
+        assertEquals(0, store.missingVectorCount());
+        store.addAll(List.of(item("same", "线程", "执行单元")));
+        assertEquals(1, store.missingVectorCount());
+        JsonKnowledgeStore reloaded = new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0);
+        assertEquals(1, reloaded.missingVectorCount(), "旧向量不能在重启后复活");
+        assertEquals(1, reloaded.backfillVectors(10).processed());
+        var v = mapper.readTree(tmp.resolve("base.vectors.json").toFile()).path("vectors").path("same");
+        assertEquals(0., v.get(0).asDouble());
+        assertEquals(1., v.get(1).asDouble());
+        assertEquals(0, new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0).missingVectorCount());
+    }
+
+    @Test
+    @DisplayName("替换来源只保留正文未变的向量，删除项不再返回")
+    void replacingSourceInvalidatesOnlyChangedText() {
+        KnowledgeItem unchanged = item("keep", "位移", "位置差");
+        store.addAll(List.of(unchanged, item("change", "位移", "旧正文"), item("remove", "线程", "删除")));
+        store.backfillVectors(10);
+        store.replaceSource("book.md", List.of(unchanged, item("change", "线程", "新正文")));
+        assertEquals(2, store.count());
+        assertEquals(1, store.missingVectorCount());
+        assertEquals(1, new JsonKnowledgeStore(mapper, FAKE, file.toString(), 0).missingVectorCount());
+    }
+
+    @Test
+    @DisplayName("向量失效落盘失败时不发布新正文，恢复后可重试")
+    void invalidationFailureDoesNotPublishNewText() throws Exception {
+        KnowledgeItem original = item("same", "位移", "位置差");
+        store.addAll(List.of(original)); store.backfillVectors(10);
+        byte[] before = Files.readAllBytes(file);
+        Path sidecar = tmp.resolve("base.vectors.json");
+        Files.delete(sidecar); Files.createDirectory(sidecar);
+        Files.writeString(sidecar.resolve("blocker"), "synthetic blocker");
+        assertThrows(AgentException.class, () -> store.addAll(List.of(item("same", "线程", "执行单元"))));
+        assertEquals(original, store.get("same"));
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(file)));
+        Files.delete(sidecar.resolve("blocker")); Files.delete(sidecar);
+        store.addAll(List.of(item("same", "线程", "执行单元")));
+        assertEquals(1, store.missingVectorCount());
+    }
+
     @BeforeEach
     void setUp() {
         file = tmp.resolve("base.json");

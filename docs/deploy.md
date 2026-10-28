@@ -1,5 +1,7 @@
 # 部署手册（第一阶段：个人受控云部署）
 
+> **2026-10-28 状态入口**：[本轮接管验收](takeover-2026-10-28.md)。下文旧的单用户、未上云等说明保留为历史方案；当前支持邀请账号与用户数据隔离，目标使用 Ubuntu systemd + 云 embedding。域名/HTTPS 尚不在本轮变更范围。
+
 > 目标：把现有 Agent 部署成**只有本人/受邀者能访问**的学习工具；重启不丢数据，故障可识别，资源有边界。
 > 当前状态：单用户受控版本，**不宣称已具备多用户数据隔离**。
 
@@ -338,7 +340,7 @@ FA_EMBEDDING_HEALTH_PATH=/health         # 没有就留空，健康显示 UNKNOW
 FA_EMBEDDING_TIMEOUT_SECONDS=20
 ```
 
-要求：请求 `POST /v1/embeddings`、响应 `data[].embedding`；超时/鉴权/条数要核对。换模型/维度后旧向量自动作废，首次检索会重算，别把旧缓存和新模型混用。外部方案**不需要 `models/`，也不需要 `docker-compose.local-embedding.yml`**。
+要求：请求 `POST /v1/embeddings`、响应 `data[].embedding`；超时/鉴权/条数要核对。换模型指纹后旧向量不再采用，须管理员显式分批补齐；查询不会自动重算全库。别混用旧缓存和新模型。外部方案**不需要 `models/`，也不需要 `docker-compose.local-embedding.yml`**。
 
 ## 9. 已知限制
 

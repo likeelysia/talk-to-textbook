@@ -78,4 +78,39 @@ class PdfReaderTest {
         assertEquals("第 1 页", segments.get(0).location());
         assertTrue(segments.get(0).text().contains("OCR 出来的文字"));
     }
+
+    @Test
+    @DisplayName("混合 PDF：文字页照常读，只有缺文字的页走 OCR，出处顺序不丢")
+    void mixedPdfReadsBothTextAndScannedPages() throws IOException {
+        Path mixed = tmp.resolve("mixed.pdf");
+        try (PDDocument doc = org.apache.pdfbox.Loader.loadPDF(makeTextPdf().toFile())) {
+            doc.addPage(new PDPage());
+            doc.save(mixed.toFile());
+        }
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        PdfReader reader = new PdfReader(OcrEngines.single(image -> {
+            calls.incrementAndGet(); return "SCANNED_PAGE_CONTENT";
+        }));
+        var result = reader.readReport(mixed, 1, 3);
+        assertEquals(3, result.segments().size());
+        assertEquals(1, calls.get());
+        assertEquals("第 3 页", result.segments().get(2).location());
+        assertEquals("SCANNED_PAGE_CONTENT", result.segments().get(2).text());
+        assertTrue(result.failedPages().isEmpty());
+    }
+
+    @Test
+    @DisplayName("混合 PDF 的 OCR 失败页进入漏页清单，不被相邻文字页掩盖")
+    void mixedPdfTracksOcrFailureAlongsideText() throws IOException {
+        Path mixed = tmp.resolve("mixed-failed.pdf");
+        try (PDDocument doc = org.apache.pdfbox.Loader.loadPDF(makeTextPdf().toFile())) {
+            doc.addPage(new PDPage()); doc.save(mixed.toFile());
+        }
+        PdfReader reader = new PdfReader(OcrEngines.single(image -> {
+            throw new io.github.likeelysia.formalagent.exception.AgentException("synthetic OCR error");
+        }));
+        var result = reader.readReport(mixed, 1, 3);
+        assertEquals(2, result.segments().size());
+        assertEquals(List.of(3), result.failedPages());
+    }
 }

@@ -81,12 +81,19 @@ public class PdfReader implements DocumentReader {
             int to = Math.min(total, toPage);
             if (from > to) return ReadResult.empty();               // 空区间:没页可读
 
-            List<TextSegment> segments = extractText(doc, from, to); // ① 先试文字层
-            List<Integer> failed = List.of();
-            if (segments.isEmpty()) {                                // ② 扫描件兜底:走 OCR
-                ReadResult ocr = ocrPages(doc, from, to);
-                segments = ocr.segments();
-                failed = ocr.failedPages();
+            List<TextSegment> textPages = extractText(doc, from, to);
+            List<TextSegment> segments = new ArrayList<>();
+            List<Integer> failed = new ArrayList<>();
+            // 逐页选择：同一份 PDF 里的文字页不能掩盖其他扫描页。
+            for (int p = from; p <= to; p++) {
+                TextSegment text = textPages.get(p - from);
+                if (!text.text().isBlank()) {
+                    segments.add(text);
+                } else {
+                    ReadResult one = ocrPages(doc, p, p);
+                    segments.addAll(one.segments());
+                    failed.addAll(one.failedPages());
+                }
             }
             if (segments.isEmpty() && failed.isEmpty()) {
                 // 读是读完了,只是一页正文都没有 —— 整段都是空白页 / 封面 / 篇章扉页。
@@ -107,7 +114,8 @@ public class PdfReader implements DocumentReader {
             stripper.setStartPage(p);
             stripper.setEndPage(p);
             String text = stripper.getText(doc);
-            if (!text.isBlank()) segments.add(new TextSegment(text, "第 " + p + " 页"));
+            // 保留空页位置，由上层逐页决定 OCR，避免把“缺文字”静默当作空白。
+            segments.add(new TextSegment(text, "第 " + p + " 页"));
         }
         return segments;
     }

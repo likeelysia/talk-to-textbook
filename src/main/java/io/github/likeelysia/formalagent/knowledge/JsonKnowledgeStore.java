@@ -159,10 +159,12 @@ public class JsonKnowledgeStore implements KnowledgeStore {
     public void addAll(List<KnowledgeItem> newItems) {
         writeLock.lock();
         try {
+            Map<String, KnowledgeItem> next;
             synchronized (stateLock) {
-                for (KnowledgeItem item : newItems) items.put(item.id(), item);   // 同 id 覆盖
+                next = new LinkedHashMap<>(items);
             }
-            persist();
+            for (KnowledgeItem item : newItems) next.put(item.id(), item);       // 同 id 覆盖
+            commit(next);
         } finally {
             writeLock.unlock();
         }
@@ -221,16 +223,16 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         writeLock.lock();
         try {
             int removed;
+            Map<String, KnowledgeItem> next;
             synchronized (stateLock) {
                 removed = (int) items.values().stream()
                         .filter(k -> source.equals(k.source()))
                         .count();
                 if (removed == 0) return 0;
-                items.values().removeIf(k -> source.equals(k.source()));
-                purgeOrphanVectors();
+                next = new LinkedHashMap<>(items);
             }
-            persist();
-            persistVectors();                                         // 顺手把向量 sidecar 瘦身
+            next.values().removeIf(k -> source.equals(k.source()));
+            commit(next);
             log.info("按来源删除 {} 条:{}", removed, source);
             return removed;
         } finally {
@@ -246,16 +248,16 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         writeLock.lock();
         try {
             int removed;
+            Map<String, KnowledgeItem> next;
             synchronized (stateLock) {
                 removed = (int) items.values().stream()
                         .filter(k -> source.equals(k.source()))
                         .count();
-                items.values().removeIf(k -> source.equals(k.source()));       // ① 这本旧的全不要
-                for (KnowledgeItem item : newItems) items.put(item.id(), item); // ② 整份换成新的
-                purgeOrphanVectors();
+                next = new LinkedHashMap<>(items);
             }
-            persist();
-            persistVectors();
+            next.values().removeIf(k -> source.equals(k.source()));           // ① 这本旧的全不要
+            for (KnowledgeItem item : newItems) next.put(item.id(), item);     // ② 整份换成新的
+            commit(next);
             log.info("重灌来源 {}:清掉旧条目 {} 条,新收录 {} 条", source, removed, newItems.size());
             return newItems.size();
         } finally {
@@ -263,9 +265,32 @@ public class JsonKnowledgeStore implements KnowledgeStore {
         }
     }
 
-    /** 清掉向量表里已经不存在对应条目的记录(删条目时顺手调用),免得 sidecar 越滚越大。 */
-    private void purgeOrphanVectors() {
-        vectors.keySet().removeIf(id -> !items.containsKey(id));
+    /**
+     * 写动作统一提交：先使旧向量落盘失效，再原子替换正文，成功后才发布内存。
+     * 两个文件不是一个事务；中途失败最多使旧正文缺向量，不能让新正文配到旧向量。
+     * 调用方必须持有 writeLock；慢写盘不持有 stateLock，普通查询仍读旧的完整版本。
+     */
+    private void commit(Map<String, KnowledgeItem> next) {
+        Map<String, float[]> retained = new LinkedHashMap<>();
+        synchronized (stateLock) {
+            vectors.forEach((id, vector) -> {
+                KnowledgeItem old = items.get(id), updated = next.get(id);
+                if (old != null && updated != null
+                        && Objects.equals(old.name(), updated.name())
+                        && Objects.equals(old.detail(), updated.detail())) {
+                    retained.put(id, vector);
+                }
+            });
+        }
+        // 已有 sidecar 必须先清理：兼容旧文件中的孤立 ID，避免重启后过期向量复活。
+        if (Files.exists(vectorFile) && !writeVectors(retained)) {
+            throw new AgentException("旧向量失效落盘失败,未发布新知识:" + vectorFile);
+        }
+        persist(next);
+        synchronized (stateLock) {
+            items.clear(); items.putAll(next);
+            vectors.clear(); vectors.putAll(retained);
+        }
     }
 
     // ---------------------------------------------------------------- 检索(hybrid + 阈值)
@@ -445,21 +470,30 @@ public class JsonKnowledgeStore implements KnowledgeStore {
 
     // ---------------------------------------------------------------- 落盘
 
-    private void persist() {
+    private void persist(Map<String, KnowledgeItem> snapshot) {
+        Path tmp = null;
         try {
             Path parent = file.toAbsolutePath().getParent();
             if (parent != null) Files.createDirectories(parent);
-            try (OutputStream out = Files.newOutputStream(file)) {
-                mapper.writerWithDefaultPrettyPrinter().writeValue(out, items.values());
+            tmp = Files.createTempFile(parent, "." + file.getFileName() + "-", ".tmp");
+            try (OutputStream out = Files.newOutputStream(tmp)) {
+                mapper.writerWithDefaultPrettyPrinter().writeValue(out, snapshot.values());
             }
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+            tmp = null;
         } catch (IOException e) {
             throw new AgentException("写入知识库失败:" + file, e);
+        } finally {
+            if (tmp != null) {
+                try { Files.deleteIfExists(tmp); }
+                catch (IOException ignored) { /* 不掩盖原始写入异常 */ }
+            }
         }
-    }
-
-    /** 向量落盘:写临时文件,成功后再原子替换;失败时保留旧 sidecar。 */
-    private boolean persistVectors() {
-        return writeVectors(vectors);
     }
 
     private boolean writeVectors(Map<String, float[]> snapshot) {
