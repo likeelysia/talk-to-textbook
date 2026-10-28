@@ -2,6 +2,7 @@ package io.github.likeelysia.formalagent.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.DispatcherType;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -35,6 +36,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
+        // SSE 完成时容器会再次派发同一个请求；不能再扣额度或向已开始的流写 JSON。
+        if (request.getDispatcherType() == DispatcherType.ASYNC) return true;
         String key = keyOf(request);
         if (!allow(key) || !allow("global")) {
             response.setStatus(429);

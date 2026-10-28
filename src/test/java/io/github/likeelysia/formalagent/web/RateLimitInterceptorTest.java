@@ -3,6 +3,7 @@ package io.github.likeelysia.formalagent.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import jakarta.servlet.DispatcherType;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -10,6 +11,23 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class RateLimitInterceptorTest {
+
+    @Test
+    void sseCompletionDoesNotConsumeAnotherQuotaOrRewriteStream() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(1);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/agent/stream");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertThat(interceptor.preHandle(request, response, new Object())).isTrue();
+        response.getOutputStream().write("data: answer\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        response.flushBuffer();
+        request.setDispatcherType(DispatcherType.ASYNC);
+        assertThat(interceptor.preHandle(request, response, new Object())).isTrue();
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getContentAsString()).isEqualTo("data: answer\n\n");
+        MockHttpServletResponse next = new MockHttpServletResponse();
+        assertThat(interceptor.preHandle(new MockHttpServletRequest("POST", "/api/agent"), next, new Object())).isFalse();
+        assertThat(next.getStatus()).isEqualTo(429);
+    }
 
     @Test
     void rejectsAfterLimitWithinWindow() throws Exception {

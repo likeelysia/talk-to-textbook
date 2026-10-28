@@ -1,17 +1,20 @@
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import http.cookiejar, json, os, secrets, socket, subprocess, sys, threading, time
+import http.cookiejar, json, os, re, secrets, socket, subprocess, sys, threading, time
 import urllib.request, urllib.error, urllib.parse
 
 ROOT = Path(os.environ.get('PROJECT_ROOT', r'F:\JAVA__PROJECT\talk-to-textbook'))
 RUNTIME = Path(os.environ.get('BROWSER_RUN_DIR', str(ROOT / 'target/browser-fixture')))
 INFO_PATH = Path(os.environ.get('BROWSER_INFO', str(ROOT / 'target/browser-fixture.json')))
-if RUNTIME.exists():
-    import shutil; shutil.rmtree(RUNTIME)
-(RUNTIME / 'data/memory').mkdir(parents=True)
-(RUNTIME / 'data/memory/core.md').write_text('SYNTHETIC_OLD_PROFILE', encoding='utf-8')
-(RUNTIME / 'knowledge').mkdir()
-(RUNTIME / 'knowledge/base.json').write_text('[]', encoding='utf-8')
+reuse = os.environ.get('FIXTURE_REUSE_RUNTIME') == '1'
+if RUNTIME.exists() and not reuse:
+    raise RuntimeError('Use a fresh fixture directory; existing data is never deleted')
+if not reuse:
+    (RUNTIME / 'data/memory').mkdir(parents=True)
+    (RUNTIME / 'data/memory/core.md').write_text('SYNTHETIC_OLD_PROFILE', encoding='utf-8')
+    (RUNTIME / 'knowledge').mkdir()
+    (RUNTIME / 'knowledge/base.json').write_text('[]', encoding='utf-8')
+    (RUNTIME / 'sessions').mkdir()
 
 class Fake(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
@@ -35,11 +38,20 @@ class Fake(BaseHTTPRequestHandler):
             data = {'data': [{'index': i, 'embedding': [1., 0.]} for i, _ in enumerate(texts)]}
             raw = json.dumps(data).encode(); self.send_response(200)
             self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw); return
+        # Only the current user turn selects a scenario. History must not change the reply.
+        current = next((str(m.get('content', '')) for m in reversed(b.get('messages', []))
+                        if m.get('role') == 'user'), '')
+        marker = re.search(r'CHAIN_[A-Z0-9_]+', current)
+        answer = 'ANSWER_' + marker.group() if marker else 'SYNTHETIC_STREAM_ANSWER'
+        if os.environ.get('FIXTURE_FAIL_AFTER_CANCEL') == '1' and 'CHAIN_AFTER_CANCEL' in current:
+            (RUNTIME / 'forced-model-error.json').write_text('{"observed":true}', encoding='utf-8')
+            self.send_response(503); self.end_headers(); return
         if b.get('stream'):
-            slow = 'SLOW_SSE' in json.dumps(b, ensure_ascii=False)
+            slow = 'SLOW_SSE' in current
             if slow:
+                release.clear()
                 stream_state.update(wait_returned=None, done_sent=False, client_cancelled=False)
-            first = 'SYNTHETIC_SLOW_FIRST' if slow else 'SYNTHETIC_STREAM_ANSWER'
+            first = 'SYNTHETIC_SLOW_FIRST' if slow else answer
             self.send_response(200); self.send_header('Content-Type', 'text/event-stream')
             self.end_headers()
             self.wfile.write(('data: {"choices":[{"delta":{"content":"%s"}}]}\n\n' % first).encode())
@@ -55,7 +67,7 @@ class Fake(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 if slow: stream_state['client_cancelled'] = True
             return
-        data = {'choices': [{'message': {'role': 'assistant', 'content': 'SYNTHETIC_MODEL_ANSWER', 'tool_calls': []}, 'finish_reason': 'stop'}]}
+        data = {'choices': [{'message': {'role': 'assistant', 'content': answer if marker else 'SYNTHETIC_MODEL_ANSWER', 'tool_calls': []}, 'finish_reason': 'stop'}]}
         raw = json.dumps(data).encode(); self.send_response(200)
         self.send_header('Content-Type', 'application/json'); self.end_headers(); self.wfile.write(raw)
 
@@ -66,7 +78,7 @@ threading.Thread(target=fake.serve_forever, daemon=True).start()
 with socket.socket() as s:
     s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]
 base = 'http://127.0.0.1:' + str(port)
-password = secrets.token_urlsafe(18)
+password = os.environ.get('FIXTURE_PASSWORD') or secrets.token_urlsafe(18)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **kw): return None
@@ -94,7 +106,7 @@ class Client:
         assert code == 302, code
         self.token = self.req('/api/auth/csrf')[1]['token']
 
-jar = Path(os.environ.get('BROWSER_JAR', str(ROOT / 'dist/talk-to-textbook-0.1.0-identity-guard-local-review.jar')))
+jar = Path(os.environ.get('BROWSER_JAR', str(ROOT / 'target/talk-to-textbook-0.1.0-SNAPSHOT.jar')))
 args = [r'F:/opc-tools/android/jdk-17.0.20.1+1/bin/java.exe', '-Xmx384m', '-Dfile.encoding=UTF-8', '-jar', str(jar),
         '--server.address=127.0.0.1', '--server.port=' + str(port), '--fa.cli.enabled=false',
         '--fa.auth.username=review_admin', '--fa.auth.password=' + password, '--fa.auth.password-hash=',
@@ -103,7 +115,8 @@ args = [r'F:/opc-tools/android/jdk-17.0.20.1+1/bin/java.exe', '-Xmx384m', '-Dfil
         '--fa.embedding.api-key=fake-only', '--fa.embedding.dimensions=2',
         '--fa.deepseek.api-key=fake-only', '--fa.deepseek.api-url=http://127.0.0.1:' + str(fake.server_port) + '/chat/completions',
         '--fa.vision.api-key=fake-only', '--fa.vision.api-url=http://127.0.0.1:' + str(fake.server_port) + '/chat/completions',
-        '--fa.memory.long-term.enabled=false', '--fa.memory.short-term.summarize=false', '--fa.memory.core.max-chars=32']
+        '--fa.memory.long-term.enabled=' + os.environ.get('FIXTURE_LONG_TERM', 'false'),
+        '--fa.memory.short-term.summarize=false', '--fa.memory.core.max-chars=32']
 env = {k: v for k, v in os.environ.items() if not k.startswith(('FA_', 'SPRING_'))
        and k not in ('DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'MOONSHOT_API_KEY', 'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS')}
 log = open(RUNTIME / 'app.log', 'w', encoding='utf-8')
@@ -121,7 +134,7 @@ try:
         time.sleep(.5)
     else: raise RuntimeError('startup timeout')
     admin = Client(); admin.login('review_admin')
-    for name in ('review_A', 'review_B'):
+    for name in (() if reuse else ('review_A', 'review_B')):
         code, body = admin.req('/api/admin/accounts', 'POST', dict(username=name, password=password, role='USER'))
         assert code == 200, (code, body)
     info = {'base': base, 'control': 'http://127.0.0.1:' + str(fake.server_port) + '/release', 'streamState': 'http://127.0.0.1:' + str(fake.server_port) + '/stream-state', 'username': 'review_A', 'password': password, 'runtime': str(RUNTIME)}

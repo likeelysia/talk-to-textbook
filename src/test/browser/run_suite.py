@@ -1,10 +1,10 @@
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, time, uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 PY = os.environ.get('PYTHON', sys.executable)
-RUN = ROOT / 'target/browser-runs' / time.strftime('%Y%m%d-%H%M%S')
-RUN.mkdir(parents=True, exist_ok=True)
+RUN = ROOT / 'target/browser-runs' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+RUN.mkdir(parents=True, exist_ok=False)
 INFO = RUN / 'fixture.json'
 os.environ['PROJECT_ROOT'] = str(ROOT)
 os.environ['BROWSER_RUN_DIR'] = str(RUN / 'runtime')
@@ -15,7 +15,7 @@ FIXTURE = ROOT / 'src/test/browser/browser_fixture.py'
 
 def run(script):
     print('RUN', script, flush=True)
-    return subprocess.call([PY, str(ROOT / 'src/test/browser' / script)], cwd=str(ROOT), env=os.environ)
+    return subprocess.call([PY, str(ROOT / 'src/test/browser' / script)], cwd=str(ROOT), env=os.environ, timeout=180)
 
 def kill_tree(pid):
     if pid:
@@ -40,9 +40,10 @@ try:
         time.sleep(.5)
     else:
         raise RuntimeError('fixture ready timeout')
-    a = run('slow_json_test.py')
-    b = run('sse_same_page_test.py')
-    c = run('expected_user_test.py')
+    negative = os.environ.get('FIXTURE_FAIL_AFTER_CANCEL') == '1'
+    a = 0 if negative else run('slow_json_test.py')
+    b = 0 if negative else run('sse_same_page_test.py')
+    c = 0 if negative else run('expected_user_test.py')
     d = run('learning_chain_test.py')
     exit_code = 0 if a == 0 and b == 0 and c == 0 and d == 0 else 1
     print(f'SUITE slow_json={a} sse_same_page={b} expected_user={c} learning_chain={d} exit={exit_code}', flush=True)
