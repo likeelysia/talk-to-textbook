@@ -54,14 +54,28 @@ public final class KnowledgeSearchProbe {
                     Map<String, Object> row = new LinkedHashMap<>(one);
                     row.put("hits", hits); row.put("milliseconds", (System.nanoTime() - started) / 1_000_000);
                     rows.add(row);
-                    if (expected == null || expected.isBlank()) {
+                    String expectedSource = (String) one.get("expectSource");
+                    if ((expected == null || expected.isBlank()) && expectedSource == null) {
                         unanswerable++; if (hits.isEmpty()) refused++;
                     } else {
                         answerable++;
+                        int rank = 0;
                         for (int i = 0; i < hits.size(); i++) {
-                            if (expected.equals(hits.get(i).name())) { matched++; reciprocal += 1.0 / (i + 1); break; }
+                            var hit = hits.get(i);
+                            boolean correct;
+                            if (expectedSource != null) {
+                                @SuppressWarnings("unchecked")
+                                List<Integer> pages = (List<Integer>) one.get("expectPages");
+                                String needle = (String) one.get("expectText");
+                                correct = expectedSource.equals(hit.source())
+                                        && (pages == null || pages.stream().anyMatch(p -> ("第 " + p + " 页").equals(hit.location())))
+                                        && (needle == null || hit.detail().contains(needle));
+                            } else { correct = expected.equals(hit.name()); }
+                            if (correct) { rank = i + 1; matched++; reciprocal += 1.0 / rank; break; }
                         }
-                        if (hits.stream().anyMatch(i -> java.util.Objects.equals(one.get("expectPage"), i.location()))) pageHit++;
+                        row.put("rank", rank); row.put("matched", rank > 0);
+                        if (expectedSource != null) { if (rank > 0) pageHit++; }
+                        else if (hits.stream().anyMatch(i -> java.util.Objects.equals(one.get("expectPage"), i.location()))) pageHit++;
                     }
                 }
                 result = Map.of("knowledgeCount", store.count(), "missingVectors", store.missingVectorCount(),

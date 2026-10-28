@@ -1,0 +1,227 @@
+[
+  {
+    "query": "尼采讲的精神三种变形：骆驼、狮子、小孩分别表示什么？",
+    "expectSource": "查拉图斯特拉如是说.pdf",
+    "expectPages": [
+      35,
+      36,
+      37,
+      38
+    ],
+    "productionSmoke": true,
+    "expectText": "骆驼"
+  },
+  {
+    "query": "《查拉图斯特拉如是说》的末人如何追求幸福和安逸？",
+    "expectSource": "查拉图斯特拉如是说.pdf",
+    "expectPages": [
+      24,
+      25,
+      26,
+      27
+    ],
+    "productionSmoke": false,
+    "expectText": "末人"
+  },
+  {
+    "query": "人是一根连接动物与超人的绳索，这个比喻是什么意思？",
+    "expectSource": "查拉图斯特拉如是说.pdf",
+    "expectPages": [
+      22
+    ],
+    "productionSmoke": false,
+    "expectText": "绳索"
+  },
+  {
+    "query": "《存在与时间》为什么要先对“此在”作存在论分析？",
+    "expectSource": "存在与时间.pdf",
+    "expectPages": [
+      39,
+      40,
+      41,
+      42,
+      43,
+      44
+    ],
+    "productionSmoke": true,
+    "expectText": "此在"
+  },
+  {
+    "query": "《存在与时间》中上手状态与仅仅理论观察有何不同？",
+    "expectSource": "存在与时间.pdf",
+    "expectPages": [
+      110,
+      111,
+      112,
+      113,
+      114,
+      115
+    ],
+    "productionSmoke": false,
+    "expectText": "上手"
+  },
+  {
+    "query": "《存在与时间》怎样联系操心与时间性？",
+    "expectSource": "存在与时间.pdf",
+    "expectPages": [
+      313,
+      314,
+      315,
+      316,
+      317,
+      318,
+      319,
+      320,
+      321,
+      322,
+      323,
+      324,
+      325,
+      326,
+      327,
+      328,
+      329,
+      330,
+      425
+    ],
+    "productionSmoke": false,
+    "expectText": "时间性"
+  },
+  {
+    "query": "维果茨基所说的最近发展区是两个什么水平之间的差异？",
+    "expectSource": "发展心理学（第三版）.pdf",
+    "expectPages": [
+      58,
+      59
+    ],
+    "productionSmoke": true,
+    "expectText": "最近发展区"
+  },
+  {
+    "query": "皮亚杰把儿童认知发展分成哪四个阶段？",
+    "expectSource": "发展心理学（第三版）.pdf",
+    "expectPages": [
+      63,
+      70
+    ],
+    "productionSmoke": false,
+    "expectText": "感知运动"
+  },
+  {
+    "query": "《发展心理学》横断研究与纵向研究的区别是什么？",
+    "expectSource": "发展心理学（第三版）.pdf",
+    "expectPages": [
+      76,
+      77,
+      78,
+      79
+    ],
+    "productionSmoke": false,
+    "expectText": "研究"
+  },
+  {
+    "query": "《社会性动物》中认知不协调是什么，人为什么要减少它？",
+    "expectSource": "社会性动物.pdf",
+    "expectPages": [
+      181,
+      182,
+      183,
+      184,
+      231,
+      232
+    ],
+    "productionSmoke": true,
+    "expectText": "不协调"
+  },
+  {
+    "query": "为什么目击意外事故的人越多，每个人越可能不出手帮助？",
+    "expectSource": "社会性动物.pdf",
+    "expectPages": [
+      58,
+      59,
+      60,
+      61,
+      62
+    ],
+    "productionSmoke": false,
+    "expectText": "责任"
+  },
+  {
+    "query": "阿希线段判断实验说明了怎样的从众现象？",
+    "expectSource": "社会性动物.pdf",
+    "expectPages": [
+      30,
+      31,
+      32
+    ],
+    "productionSmoke": false,
+    "expectText": "阿希"
+  },
+  {
+    "query": "《乌合之众》为什么说情感和行为在群体中会发生传染？",
+    "expectSource": "乌合之众.pdf",
+    "expectPages": [
+      53,
+      54,
+      55
+    ],
+    "productionSmoke": true,
+    "expectText": "传染"
+  },
+  {
+    "query": "《乌合之众》中群体领袖的断言、重复、传染如何发挥影响？",
+    "expectSource": "乌合之众.pdf",
+    "expectPages": [
+      125,
+      126,
+      127,
+      128
+    ],
+    "productionSmoke": false,
+    "expectText": "重复"
+  },
+  {
+    "query": "《乌合之众》为何说群体会夸大情感，不适合用理性证明来说服？",
+    "expectSource": "乌合之众.pdf",
+    "expectPages": [
+      68,
+      69
+    ],
+    "productionSmoke": false,
+    "expectText": "情感"
+  },
+  {
+    "query": "《牙体牙髓病学》的龋病四联因素学说包括哪些因素？",
+    "expectSource": "牙体牙髓病学（第五版）.pdf",
+    "expectPages": [
+      42,
+      43
+    ],
+    "productionSmoke": true,
+    "expectText": "四联因素"
+  },
+  {
+    "query": "可复性牙髓炎在温度刺激撤除后的疼痛有什么特点？",
+    "expectSource": "牙体牙髓病学（第五版）.pdf",
+    "expectPages": [
+      183,
+      184,
+      185
+    ],
+    "productionSmoke": false,
+    "expectText": "可复性牙髓炎"
+  },
+  {
+    "query": "《牙体牙髓病学》中急性牙髓炎的自发痛和夜间痛是什么特点？",
+    "expectSource": "牙体牙髓病学（第五版）.pdf",
+    "expectPages": [
+      184,
+      185,
+      186,
+      187,
+      188
+    ],
+    "productionSmoke": false,
+    "expectText": "夜间"
+  }
+]
