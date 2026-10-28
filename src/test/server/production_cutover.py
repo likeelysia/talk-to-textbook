@@ -207,6 +207,36 @@ def publish(revision):
         raise
 
 
+def post_restart():
+    receipt=json.loads((v.EVIDENCE/'production-cutover.json').read_text())
+    assert v.production()['sha256']==receipt['after']['sha256']
+    stopped()
+    try:
+        before=m.manifest(PROD)
+    finally:
+        v.command('systemctl','start','lamplit')
+    state=wait_production()
+    assert state['knowledgeCount']==12925 and state['missingVectors']==0
+    after=m.manifest(PROD)
+    assert before==after, 'Persistent files changed on restart; inspect before claiming success'
+    username=json.loads((v.EVIDENCE/'production-smoke.json').read_text())['temporaryUsername']
+    with sqlite3.connect('file:'+str(PROD/'data/accounts/accounts.db')+'?mode=ro',uri=True) as db:
+        assert db.execute('select enabled from accounts where username=?',(username,)).fetchone()[0]==0
+    v.write(v.EVIDENCE/'production-after-restart.json',{'allPersistentFileHashesMatch':True,
+        'filesCompared':len(before),'temporaryAccountStillDisabled':True,'production':v.production()})
+    print(json.dumps({'productionRestartVerified':True,'filesCompared':len(before)}))
+
+
+def rollback_publication():
+    receipt=json.loads((v.EVIDENCE/'production-cutover.json').read_text())
+    assert v.production()['sha256']==receipt['after']['sha256'], 'Re-review changed production'
+    assert m.sha(pathlib.Path('/etc/lamplit/lamplit.env'))==m.sha(BACKUP/'lamplit.env'), 'Re-review changed configuration'
+    assert m.sha(BACKUP/'data.tar.gz')==receipt['archiveSHA256']
+    restore_old(receipt['before'])
+
+
 if __name__=='__main__':
-    if len(sys.argv)!=4 or sys.argv[2]!='publish': raise SystemExit('Explicit publish and revision required')
-    publish(sys.argv[3])
+    if len(sys.argv)==4 and sys.argv[2]=='publish': publish(sys.argv[3])
+    elif len(sys.argv)==3 and sys.argv[2]=='post-restart': post_restart()
+    elif len(sys.argv)==3 and sys.argv[2]=='rollback': rollback_publication()
+    else: raise SystemExit('Explicit publish/revision, post-restart or rollback required')
