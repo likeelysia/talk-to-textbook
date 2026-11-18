@@ -89,7 +89,7 @@ public class FileStorage {
         if (!ALLOWED.contains(ext)) {
             throw new AgentException("不支持的文件类型 \"" + ext + "\"(仅支持 " + ALLOWED + ")");
         }
-        // 4) 唯一化:时间戳前缀,既防重名覆盖,也防被猜到
-        return LocalDateTime.now().format(STAMP) + "-" + name;
+        // 4) 唯一化:时间戳 + 随机 UUID，避免不同用户同秒上传同名图片时互相覆盖
+        return LocalDateTime.now().format(STAMP) + "-" + java.util.UUID.randomUUID() + "-" + name;
     }
 }

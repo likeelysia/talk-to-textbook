@@ -88,7 +88,10 @@ public class AgentController {
      *
      * <p>{@code conversationId} 可以不传 —— 不传就落到「默认对话」,老前端不用改。
      */
-    public record AgentRequest(String question, String conversationId) {
+    public record AgentRequest(String question, String conversationId, boolean webSearch) {
+        public AgentRequest(String question, String conversationId) {
+            this(question, conversationId, false);
+        }
     }
 
     /** 响应体:{"answer":"...【出处】...","steps":2,"trace":[...],"conversationId":"default"}。 */
@@ -101,14 +104,18 @@ public class AgentController {
         if (req == null || req.question() == null || req.question().isBlank()) {
             throw new AgentException("question 不能为空");
         }
-        return ask(assistant(auth), req.conversationId(), req.question());
+        AssistantService scoped = assistant(auth);
+        if (!req.webSearch()) return ask(scoped, req.conversationId(), req.question());
+        AssistantService.Turn turn = scoped.ask(req.conversationId(), req.question(), true);
+        return response(turn);
     }
 
     public AgentResponse agent(AgentRequest req) {
         if (req == null || req.question() == null || req.question().isBlank()) {
             throw new AgentException("question 不能为空");
         }
-        return ask(assistant, req.conversationId(), req.question());
+        if (!req.webSearch()) return ask(assistant, req.conversationId(), req.question());
+        return response(assistant.ask(req.conversationId(), req.question(), true));
     }
 
     /**
@@ -187,7 +194,10 @@ public class AgentController {
     /** 跑一轮(记忆 + Agent + 落库)→ 组装响应。 */
     private AgentResponse ask(AssistantService assistant, String conversationId,
                               String modelQuestion, String displayQuestion) {
-        AssistantService.Turn turn = assistant.ask(conversationId, modelQuestion, displayQuestion);
+        return response(assistant.ask(conversationId, modelQuestion, displayQuestion));
+    }
+
+    private AgentResponse response(AssistantService.Turn turn) {
         AgentResult result = turn.result();
         return new AgentResponse(result.answer(), result.steps(), result.trace(), turn.conversationId());
     }

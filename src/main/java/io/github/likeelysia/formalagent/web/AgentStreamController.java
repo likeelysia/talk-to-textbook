@@ -85,7 +85,7 @@ public class AgentStreamController {
         emitter.onCompletion(() -> cancelled.set(true));
         emitter.onTimeout(() -> cancelled.set(true));
         emitter.onError(error -> cancelled.set(true));
-        streams.start(emitter, out -> pipe(assistant, out, conversationId, req.question(), cancelled),
+        streams.start(emitter, out -> pipe(assistant, out, conversationId, req.question(), cancelled, req.webSearch()),
                 () -> cancelled.set(true));
         return emitter;
     }
@@ -104,10 +104,10 @@ public class AgentStreamController {
     }
 
     /** 真正的推送:把 StreamSink 的三个动作翻译成 SSE 事件,结束时补一条 done。 */
-    private void pipe(AssistantService assistant, SseEmitter out, String conversationId, String question, AtomicBoolean cancelled) {
+    private void pipe(AssistantService assistant, SseEmitter out, String conversationId, String question, AtomicBoolean cancelled, boolean webSearch) {
         SseStreamer.sendEvent(out, "meta", Map.of("conversationId", conversationId));
 
-        AssistantService.Turn turn = assistant.askStream(conversationId, question, question, new StreamSink() {
+        StreamSink sink = new StreamSink() {
             @Override
             public void onDelta(String text) {
                 SseStreamer.sendEvent(out, "delta", Map.of("text", text));
@@ -127,7 +127,10 @@ public class AgentStreamController {
             public boolean isCancelled() {
                 return cancelled.get();
             }
-        });
+        };
+        AssistantService.Turn turn = webSearch
+                ? assistant.askStream(conversationId, question, sink, true)
+                : assistant.askStream(conversationId, question, question, sink);
 
         AgentResult result = turn.result();
         SseStreamer.sendEvent(out, "done", new AgentController.AgentResponse(

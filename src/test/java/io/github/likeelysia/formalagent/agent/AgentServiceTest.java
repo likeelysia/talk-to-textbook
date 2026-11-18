@@ -264,4 +264,33 @@ class AgentServiceTest {
         assertEquals("你好呀", result.answer());
         assertEquals(1, result.steps());
     }
+
+    @Test
+    void webSearchRequiresOptInAndReviewedKnowledgeAndRunsOnlyOnce() {
+        FakeTool knowledge = new FakeTool() {
+            @Override public String name() { return "search_knowledge"; }
+        };
+        FakeTool web = new FakeTool() {
+            @Override public String name() { return "search_web"; }
+        };
+        ToolCall search = new ToolCall("kb", "function",
+                new ToolCall.Function("search_knowledge", "{}"));
+        ToolCall early = new ToolCall("early", "function",
+                new ToolCall.Function("search_web", "{}"));
+        ToolCall allowed = new ToolCall("allowed", "function",
+                new ToolCall.Function("search_web", "{}"));
+        ToolCall repeated = new ToolCall("again", "function",
+                new ToolCall.Function("search_web", "{}"));
+        AssistantTurn first = new AssistantTurn(null, List.of(search, early));
+        AssistantTurn second = new AssistantTurn(null, List.of(allowed, repeated));
+        AssistantTurn answer = new AssistantTurn("答案", null);
+        new AgentService(new ScriptedLlm(first, second, answer), List.of(knowledge, web), mapper)
+                .run("问题", List.of(), false);
+        assertEquals(0, web.calls);
+
+        new AgentService(new ScriptedLlm(first, second, answer), List.of(knowledge, web), mapper)
+                .run("问题", List.of(), true);
+        assertEquals(1, web.calls);
+        assertEquals(2, knowledge.calls);
+    }
 }

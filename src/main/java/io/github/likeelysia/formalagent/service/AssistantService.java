@@ -90,7 +90,7 @@ public class AssistantService {
      * @param displayQuestion 存进历史的那句话(图片链路上是"用户原话 / 几张图")
      */
     public Turn ask(String conversationId, String modelQuestion, String displayQuestion) {
-        return ask(conversationId, modelQuestion, displayQuestion, null);
+        return ask(conversationId, modelQuestion, displayQuestion, null, false);
     }
 
     /**
@@ -101,11 +101,19 @@ public class AssistantService {
      * 不能因为"答案已经边吐边显示了"就漏掉写历史。
      */
     public Turn askStream(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink) {
-        return ask(conversationId, modelQuestion, displayQuestion, sink);
+        return ask(conversationId, modelQuestion, displayQuestion, sink, false);
+    }
+
+    public Turn ask(String conversationId, String question, boolean webSearch) {
+        return ask(conversationId, question, question, null, webSearch);
+    }
+
+    public Turn askStream(String conversationId, String question, StreamSink sink, boolean webSearch) {
+        return ask(conversationId, question, question, sink, webSearch);
     }
 
     /** 一轮问答的真正实现;sink 为 null = 非流式。 */
-    private Turn ask(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink) {
+    private Turn ask(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink, boolean webSearch) {
         String id = conversations.requireExisting(conversationId);
         Conversation conversation = conversations.get(id);
 
@@ -131,7 +139,10 @@ public class AssistantService {
         List<AgentMessage> history = assembleWithinBudget(core, recalled, context.messages(),
                 modelQuestion == null ? 0 : modelQuestion.length());
 
-        AgentResult result = (sink == null)
+        AgentResult result = webSearch
+                ? (sink == null ? agent.run(modelQuestion, history, true)
+                                : agent.runStream(modelQuestion, history, sink, true))
+                : (sink == null)
                 ? agent.run(modelQuestion, history)
                 : agent.runStream(modelQuestion, history, sink);
         Conversation recorded = conversations.record(id, displayQuestion, result.answer(), result.trace());

@@ -444,7 +444,11 @@ public class LongTermMemory {
     private List<ChatMessage> pendingMessages(Conversation conversation, int from) {
         List<ChatMessage> tail = conversation.messages().subList(from, conversation.messages().size());
         long turns = tail.stream().filter(ChatMessage::fromUser).count();
-        return turns >= extractEveryTurns() ? List.copyOf(tail) : List.of();
+        if (turns < extractEveryTurns()) return List.of();
+        // 网页回答留在聊天记录，跳过长期记忆提炼。
+        return tail.stream()
+                .filter(message -> message.trace() == null || !message.trace().contains("search_web"))
+                .toList();
     }
 
     private void markMemorized(String conversationId, int watermark) {

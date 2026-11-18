@@ -2,6 +2,8 @@ package io.github.likeelysia.formalagent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.likeelysia.formalagent.agent.AgentService;
+import io.github.likeelysia.formalagent.agent.tool.ReadVocabNotebookTool;
+import io.github.likeelysia.formalagent.vocab.UserVocabNotebooks;
 import io.github.likeelysia.formalagent.account.UserCommitLock;
 import io.github.likeelysia.formalagent.config.AppConfig;
 import io.github.likeelysia.formalagent.conversation.ConversationService;
@@ -31,6 +33,7 @@ public class UserScopeFactory {
     private final ObjectMapper mapper;
     private final AppConfig config;
     private final AgentService agent;
+    private final UserVocabNotebooks vocabNotebooks;
     private final ShortTermMemory shortTerm;
     private final MemoryExtractor extractor;
     private final EmbeddingClient embedder;
@@ -45,10 +48,11 @@ public class UserScopeFactory {
     public UserScopeFactory(ObjectMapper mapper, AppConfig config, AgentService agent,
                             ShortTermMemory shortTerm, MemoryExtractor extractor,
                             EmbeddingClient embedder, MemoryReconciler reconciler,
-                            MemoryTaskExecutor executor) {
+                            MemoryTaskExecutor executor, UserVocabNotebooks vocabNotebooks) {
         this.mapper = mapper;
         this.config = config;
         this.agent = agent;
+        this.vocabNotebooks = vocabNotebooks;
         this.shortTerm = shortTerm;
         this.extractor = extractor;
         this.embedder = embedder;
@@ -80,8 +84,10 @@ public class UserScopeFactory {
         memory.setCommitLock(commitLock);
         memory.setRecallMinScore(recallMinScore);
         CoreMemoryStore core = new CoreMemoryStore(memoryDir.resolve("core.md").toString(), coreMaxChars);
+        // ownerId 来自 Controller 的登录身份，只在构造工具时绑定，模型参数里没有账号。
+        AgentService scopedAgent = agent.withAdditionalTool(new ReadVocabNotebookTool(vocabNotebooks.of(ownerId), mapper));
         AssistantService assistant = new AssistantService(
-                agent, conversations, shortTerm, memory, core, contextMaxChars, contextReserveChars);
+                scopedAgent, conversations, shortTerm, memory, core, contextMaxChars, contextReserveChars);
         return new UserData(conversations, memory, core, conflicts, assistant);
     }
 

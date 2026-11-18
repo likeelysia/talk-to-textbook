@@ -19,6 +19,7 @@ const thumbsEl = document.getElementById('thumbs');
 const imgCountEl = document.getElementById('imgCount');
 const previewMsgEl = document.getElementById('previewMsg');
 const clearBtn = document.getElementById('clearImages');
+const webSearchToggle = document.getElementById('webSearch');
 const sendBtn = document.getElementById('send');
 const stopBtn = document.getElementById('stop');
 const convListEl = document.getElementById('convList');
@@ -54,6 +55,8 @@ const KEEP_AS_IS_BYTES = 512 * 1024;         // 又小又不超长边的图,不�
  * ⚠️ url 是 URL.createObjectURL 产生的,**不用了必须 revoke**,否则内存泄漏。
  */
 let picked = [];
+let imageProcessing = 0;
+let generating = false;
 
 /** 正在进行的流式请求:非 null 就说明"正在生成",用它来防重复提交 / 实现停止。 */
 let streamCtrl = null;
@@ -128,12 +131,14 @@ let currentConversationId = null;
 let authEpoch = 0;
 let authUserId = null;
 let identityReady = false;
+let identityCheckTask = null;
 class IdentityChangedError extends Error {
     constructor() { super('身份已切换，丢弃旧结果'); this.name = 'IdentityChangedError'; }
 }
 
 function clearPrivateDom() {
-    for (const id of ['messages','convList','kb','thumbs','previews','imgCount','question',
+    clearPicked();
+    for (const id of ['messages','convList','kb','thumbs','question',
         'coreText','memList','noteList','noteDetail']) {
         const el = document.getElementById(id);
         if (el) {
@@ -159,11 +164,21 @@ function bumpAuthEpoch(redirect = false) {
     authEpoch++;
     identityReady = false;
     authUserId = null;
+    webSearchToggle.checked = false;
     if (streamCtrl) streamCtrl.abort();
     streamCtrl = null;
     clearPrivateDom();
     if (redirect) redirectToLogin();
 }
+
+function webSearchStorageKey() {
+    return 'fa.webSearch.' + authUserId;
+}
+
+webSearchToggle.addEventListener('change', () => {
+    if (!identityReady) return;
+    localStorage.setItem(webSearchStorageKey(), webSearchToggle.checked ? '1' : '0');
+});
 
 function notifyAuthChange() {
     try {
@@ -180,6 +195,7 @@ async function initUserStorage() {
         if (startEpoch !== authEpoch) return false;
         if (!me.authenticated || !me.userId) throw new Error('身份未确认');
         authUserId = me.userId;
+        webSearchToggle.checked = localStorage.getItem(webSearchStorageKey()) === "1";
         CONV_STORAGE_KEY = 'fa.conversationId.' + authUserId;
         currentConversationId = localStorage.getItem(CONV_STORAGE_KEY);
         localStorage.removeItem('fa.conversationId');
@@ -253,7 +269,8 @@ function setHint(text) {
 
 /** 生成中:藏起"提问"、亮出"停止",防止重复提交。 */
 function setStreaming(on) {
-    sendBtn.disabled = on;
+    generating = on;
+    sendBtn.disabled = on || imageProcessing > 0 || !identityReady;
     stopBtn.hidden = !on;
 }
 
@@ -387,6 +404,17 @@ function renderRichText(raw) {
             html = html.replace(new RegExp('<p>\\s*' + token + '\\s*</p>', 'g'), token);
         });
 
+        const links = document.createElement('template');
+        links.innerHTML = html;
+        links.content.querySelectorAll('a[href]').forEach(link => {
+            if (!/^https?:\/\//i.test(link.getAttribute('href'))) {
+                link.removeAttribute('href');
+            } else {
+                link.rel = 'noopener noreferrer';
+                link.target = '_blank';
+            }
+        });
+        html = links.innerHTML;
         return html.replace(new RegExp(MATH_TOKEN + '(\\d+)@@', 'g'), (whole, n) => {   // ⑤ 公式换回真排版
             const m = found[Number(n)];
             if (!m) return whole;
@@ -458,33 +486,49 @@ async function compressImage(file) {
 /* ---------------- 图片:增 / 删 / 渲染 ---------------- */
 
 async function addFiles(list) {
+    if (identityCheckTask) await identityCheckTask;
+    if (!identityReady) return;
+    const epoch = authEpoch;
     let notImage = 0, tooBig = 0, overflow = 0;
+    imageProcessing++;
+    sendBtn.disabled = true;
+    try {
+        for (const raw of list) {
+            if (epoch !== authEpoch || !identityReady) return;
+            if (!raw.type.startsWith('image/')) { notImage++; continue; }
+            if (raw.size > MAX_RAW_BYTES) { tooBig++; continue; }
+            if (picked.length >= MAX_IMAGES) { overflow++; continue; }
 
-    for (const raw of list) {
-        if (!raw.type.startsWith('image/')) { notImage++; continue; }
-        if (raw.size > MAX_RAW_BYTES) { tooBig++; continue; }
-        if (picked.length >= MAX_IMAGES) { overflow++; continue; }
-
-        const file = await compressImage(raw);
-        picked.push({ file, url: URL.createObjectURL(file) });
+            // 先显示原图，压缩在后台完成；手机从相册返回后即可查看。
+            const item = {file:raw, url:URL.createObjectURL(raw)};
+            picked.push(item);
+            renderPreviews();
+            setHint('正在处理图片，点击缩略图可查看大图…');
+            const compressed = await compressImage(raw);
+            if (epoch !== authEpoch || !identityReady) return;
+            if (picked.includes(item)) item.file = compressed; // 已移除的图不会重新出现。
+        }
+        const msgs = [];
+        if (overflow) msgs.push(`最多 ${MAX_IMAGES} 张，有 ${overflow} 张没加进来`);
+        if (notImage) msgs.push(`${notImage} 个文件不是图片`);
+        if (tooBig) msgs.push(`${tooBig} 张超过 ${Math.round(MAX_RAW_BYTES / 1024 / 1024)}MB`);
+        setHint(msgs.join('；'));
+        renderPreviews();
+    } finally {
+        imageProcessing--;
+        sendBtn.disabled = !identityReady || generating || imageProcessing > 0;
     }
-
-    renderPreviews();
-
-    const msgs = [];
-    if (overflow) msgs.push(`最多 ${MAX_IMAGES} 张,有 ${overflow} 张没加进来`);
-    if (notImage) msgs.push(`${notImage} 个文件不是图片`);
-    if (tooBig) msgs.push(`${tooBig} 张超过 ${Math.round(MAX_RAW_BYTES / 1024 / 1024)}MB`);
-    setHint(msgs.join(';'));
 }
 
 function removeAt(index) {
     const [gone] = picked.splice(index, 1);
+    closeStudyImage();
     if (gone) URL.revokeObjectURL(gone.url);        // 删了就把 URL 释放掉
     renderPreviews();
 }
 
 function clearPicked() {
+    closeStudyImage();
     picked.forEach(p => URL.revokeObjectURL(p.url));
     picked = [];
     renderPreviews();
@@ -499,15 +543,22 @@ function renderPreviews() {
         const img = document.createElement('img');
         img.src = item.url;
         img.alt = item.file.name;
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'thumb-open';
+        open.setAttribute('aria-label', '查看第 ' + (i + 1) + ' 张图片：' + item.file.name);
+        open.addEventListener('click', () => openStudyImage(item.url, item.file.name));
+        open.appendChild(img);
 
         const del = document.createElement('button');
         del.type = 'button';
         del.className = 'del';
         del.title = '移除这张';
+        del.setAttribute('aria-label', '移除第 ' + (i + 1) + ' 张图片');
         del.textContent = '×';
         del.addEventListener('click', () => removeAt(i));
 
-        box.append(img, del);
+        box.append(open, del);
         thumbsEl.appendChild(box);
     });
 
@@ -546,6 +597,7 @@ function csrfToken() {
 }
 
 async function authFetch(url, options) {
+    if (identityCheckTask) await identityCheckTask;
     const opts = options ? Object.assign({}, options) : {};
     const method = (opts.method || 'GET').toUpperCase();
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
@@ -561,6 +613,7 @@ async function authFetch(url, options) {
     if (!identityReady) throw new IdentityChangedError();
     const epochAtStart = authEpoch;
     const res = await window.fetch(url, opts);
+    if (identityCheckTask) await identityCheckTask;
     if (epochAtStart !== authEpoch || !identityReady) {
         throw new IdentityChangedError();
     }
@@ -574,7 +627,7 @@ async function authFetch(url, options) {
         throw new Error('登录已过期，请重新登录');
     }
     if (res.status === 403) {
-        throw new Error('安全校验失败，请刷新页面后重试');
+        throw new Error(await readError(res));
     }
     return res;
 }
@@ -793,11 +846,13 @@ function bubbleThumbsHtml() {
 formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (noteSelectMode) { setHint('先退出「存笔记」模式,再提问'); return; }
-    if (streamCtrl) return;                            // 正在生成,别叠着发
+    if (imageProcessing > 0) { setHint('图片还在处理中，请稍候再发送'); return; }
+    if (generating || streamCtrl) return;               // 正在生成,别叠着发
     const question = questionEl.value.trim();
     if (!question && !picked.length) return;
 
     const filesToSend = picked.map(p => p.file);
+    const webSearch = !filesToSend.length && webSearchToggle.checked;
     const thumbs = picked.length ? bubbleThumbsHtml() : '';
     addBubble('user', thumbs + (question ? `<div>${escapeHtml(question)}</div>`
                                          : `<div>(${filesToSend.length} 张图片)</div>`));
@@ -813,9 +868,9 @@ formEl.addEventListener('submit', async (e) => {
         if (filesToSend.length) {
             await answerByImages(filesToSend, question);    // 图片要先逐张识别,仍走老接口
         } else if (!window.ReadableStream || !window.TextDecoder) {
-            await answerByText(question);                   // 浏览器太老,退化成一次性返回
+            await answerByText(question, webSearch);                   // 浏览器太老,退化成一次性返回
         } else {
-            await answerByStream(question);
+            await answerByStream(question, webSearch);
         }
     } finally {
         if (opAlive(submitOp)) loadConversations(currentConversationId);      // 首条提问会自动改标题,刷新一下列表
@@ -902,7 +957,7 @@ function safeToRenderPartial(text) {
  *   ② 节流(150ms)+ 安全检查后,把已有的文字**重画成排版好的 HTML**(公式、列表都当场成型);
  *   ③ 收到 done(或停止/断线)再整体重画一遍 —— 终稿一定是最准的。
  */
-async function answerByStream(question) {
+async function answerByStream(question, webSearch) {
     const op = activeUserOp || beginUserOp();
     const bubble = addBubble('bot',
         '<div class="answer"></div><div class="muted small stream-status">正在思考…</div>');
@@ -950,7 +1005,7 @@ async function answerByStream(question) {
         const res = await authFetch('/api/agent/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question, conversationId: currentConversationId }),
+            body: JSON.stringify({ question, conversationId: currentConversationId, webSearch }),
             signal: ctrl.signal
         });
         if (!res.ok) throw new Error(await readError(res));
@@ -1026,12 +1081,12 @@ async function answerByStream(question) {
 }
 
 /** 一次性问答(老接口):浏览器不支持流式读取时的退路。 */
-async function answerByText(question) {
+async function answerByText(question, webSearch) {
     const op = activeUserOp || beginUserOp();
     const bubble = addBubble('bot thinking', '正在思考…');
     setStreaming(true);
     try {
-        const result = await askText(question);
+        const result = await askText(question, webSearch);
         bubble.className = 'bubble bot';
         bubble.innerHTML = renderAnswer(result);
     } catch (err) {
@@ -1085,11 +1140,11 @@ stopBtn.addEventListener('click', () => {
 
 /* ---------------- 两个接口调用 ---------------- */
 
-async function askText(question) {
+async function askText(question, webSearch) {
     return apiJson('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, conversationId: currentConversationId })
+        body: JSON.stringify({ question, conversationId: currentConversationId, webSearch })
     });
 }
 
@@ -1702,32 +1757,29 @@ document.querySelectorAll('form[action="/logout"]').forEach(form => {
         if (streamCtrl) streamCtrl.abort();
     });
 });
-async function recheckIdentity() {
-    const expectedUser = authUserId;
-    authEpoch++;
-    const startEpoch = authEpoch;
-    identityReady = false;
-    clearPrivateDom();
-    if (streamCtrl) streamCtrl.abort();
-    try {
-        const r = await window.fetch('/api/auth/me', {headers: {'Accept': 'application/json'}});
-        const me = r.ok ? await r.json() : null;
-        if (startEpoch !== authEpoch) return;
-        if (!me || !me.authenticated || me.userId !== expectedUser) {
-            bumpAuthEpoch(true);
-            return;
+function recheckIdentity() {
+    if (identityCheckTask) return identityCheckTask;
+    if (!identityReady) return Promise.resolve(false);
+    const expectedUser = authUserId, startEpoch = authEpoch;
+    // focus / 从相册返回只核对账号；同一账号保留草稿、图片和当前回答。
+    const task = (async () => {
+        try {
+            const r = await window.fetch('/api/auth/me', {cache:'no-store', headers:{'Accept':'application/json'}});
+            const me = r.ok ? await r.json() : null;
+            if (startEpoch !== authEpoch) return false;
+            if (!me || !me.authenticated || me.userId !== expectedUser) {
+                bumpAuthEpoch(true);
+                return false;
+            }
+            return true;
+        } catch (_) {
+            if (startEpoch === authEpoch) bumpAuthEpoch(true);
+            return false;
         }
-        document.body.classList.remove('identity-invalid');
-        document.querySelectorAll('button, input, textarea, form').forEach(el => {
-            if (el.closest('.desk-actions')) return;
-            el.disabled = false;
-        });
-        identityReady = true;
-        initConversations();
-        loadKnowledge();
-    } catch (_) {
-        if (startEpoch === authEpoch) bumpAuthEpoch(true);
-    }
+    })();
+    identityCheckTask = task;
+    task.finally(() => { if (identityCheckTask === task) identityCheckTask = null; });
+    return task;
 }
 window.addEventListener('pageshow', (event) => {
     if (!identityReady) return;
@@ -1735,7 +1787,7 @@ window.addEventListener('pageshow', (event) => {
         recheckIdentity();
     }
 });
-window.addEventListener('visibilitychange', () => {
+document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && identityReady) recheckIdentity();
 });
 window.addEventListener('focus', () => {

@@ -1,0 +1,19 @@
+/* 保证缩略图不被聊天区 flex 布局压扁；手机可横向滑动、点开查看。 */
+.study-page #previews { flex: 0 0 auto; }
+.study-page #previews[hidden] { display: none; }
+.study-page #thumbs { flex-wrap: nowrap; overflow-x: auto; padding: 4px 0; }
+.study-page #thumbs .thumb { flex: 0 0 96px; width: 96px; height: 96px; }
+.study-page .thumb-open { padding: 0; border: 0; border-radius: 0; width: 100%; height: 100%; background: transparent; }
+.study-page #thumbs .thumb img { object-fit: contain; }
+.study-page #thumbs .del { width: 32px; height: 32px; line-height: 32px; font-size: 20px; }
+.study-page .preview-bar { flex-wrap: wrap; padding-bottom: 4px; }
+#imagePreviewDialog { position: fixed; inset: 0; padding: 12px; margin: auto; width: min(95vw, 1000px); max-width: 95vw; max-height: 92vh; max-height: 92dvh; border: 1px solid #d6d0bd; border-radius: 12px; background: #fffdf7; color: #303b32; }
+#imagePreviewDialog::backdrop { background: #14231bd9; }
+.image-preview-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+#imagePreviewName { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.image-preview-head button { flex: 0 0 auto; }
+.image-preview-stage { overflow: auto; max-height: 68vh; max-height: 68dvh; background: #eeede6; text-align: center; }
+#imagePreviewFull { display: block; max-width: 100%; max-height: 68vh; max-height: 68dvh; width: auto; height: auto; object-fit: contain; margin: auto; }
+#imagePreviewDialog.original-size #imagePreviewFull { max-width: none; max-height: none; margin: 0; }
+#zoomImagePreview { margin-top: 10px; }
+@media (max-width: 860px) { .study-page #previews { padding: 10px 14px 0; } }

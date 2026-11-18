@@ -67,4 +67,13 @@ class FileStorageTest {
         assertTrue(saved.getFileName().toString().endsWith("-笔记.md"));
         assertEquals("位移是矢量", Files.readString(saved, StandardCharsets.UTF_8));
     }
+    @Test
+    void sameNamedUploadsNeverOverwriteEachOther() throws Exception {
+        FileStorage storage = storage();
+        Path first = storage.store("camera.jpg", new ByteArrayInputStream("first".getBytes()));
+        Path second = storage.store("camera.jpg", new ByteArrayInputStream("second".getBytes()));
+        assertFalse(first.equals(second));
+        assertEquals("first", Files.readString(first));
+        assertEquals("second", Files.readString(second));
+    }
 }

@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Talk to Textbook · 教材问答</title>
     <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/study-images.css?v=20261110-mobile">
     <!-- 公式(KaTeX)+ 样式,和字体一起放在本地,断网也能用 -->
     <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-<link rel="stylesheet" href="/study-theme.css?v=20261024-icons">
+<link rel="stylesheet" href="/study-theme.css?v=20261103-web-search-sticky">
 </head>
 <body class="study-page">
 
@@ -46,6 +47,7 @@
             <div id="thumbs" class="thumbs"></div>
             <div class="preview-bar">
                 <span id="imgCount" class="muted small">0 / 10</span>
+                <span class="muted small">点击图片查看大图</span>
                 <span id="previewMsg" class="hint"></span>
                 <button id="clearImages" type="button" class="link-btn">清空全部</button>
             </div>
@@ -58,6 +60,9 @@
             </label>
             <button id="noteBtn" type="button" class="ghost" title="勾选你问过的问题,存进笔记本"><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#write"></use></svg><span id="noteButtonLabel">存笔记</span></button>
             <button id="noteSave" type="button" hidden>保存 (0)</button>
+            <label class="web-search-toggle" title="开启后持续用于文字提问，教材资料不足时搜索网页">
+                <input id="webSearch" type="checkbox" autocomplete="off"> 联网补查
+            </label>
             <button id="send" type="submit">提问</button>
             <button id="stop" type="button" class="ghost" hidden title="停止生成">停止</button>
         </form>
@@ -164,8 +169,14 @@
     </div>
 </div>
 
+<dialog id="imagePreviewDialog" aria-label="查看待发送图片">
+    <div class="image-preview-head"><span id="imagePreviewName"></span><button id="closeImagePreview" type="button">关闭</button></div>
+    <div class="image-preview-stage"><img id="imagePreviewFull" alt=""></div>
+    <button id="zoomImagePreview" type="button">查看原尺寸</button>
+</dialog>
+<script src="/study-images.js?v=20261110-mobile"></script>
 <script src="/vendor/katex/katex.min.js"></script>
 <script src="/vendor/marked.min.js"></script>
-<script src="/app.js?v=20261024-icons"></script>
+<script src="/app.js?v=20261103-web-search-sticky"></script>
 </body>
 </html>
