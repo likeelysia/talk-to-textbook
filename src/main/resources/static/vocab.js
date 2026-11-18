@@ -2,15 +2,17 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const ARTICLE_KEY = 'vocab.article.v1';
+  let articleKey = null;
+  let identityStopped = false;
   const state = { view: 'article', words: [], book: [], selected: new Set(), contexts: new Map(),
-    revealed: new Set(), version: 0, snapshot: null, extractTask: null, aiTasks: new Map(), aiErrors: new Map(),
+    revealed: new Set(), version: 0, snapshot: null, extractTask: null, importTask: null, aiTasks: new Map(), aiErrors: new Map(),
     limit: 40, saving: false, downloading: false, bookLoading: false, bookLoaded: false, serverOffset: 0 };
+  const searches = {article:{query:'',filter:'all'}, book:{query:'',filter:'all'}, review:{query:'',filter:'all'}};
   let saveTimer, editTarget, deleteTarget, contextTarget;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stale = () => state.view === 'article' && state.snapshot !== $('article').value.trim();
   const now = () => Date.now() + state.serverOffset;
-  const status = (message, kind = '') => { $('status').textContent = message; $('status').className = kind; };
+  const status = (message, kind = '') => { if (identityStopped) return; $('status').textContent = message; $('status').className = kind; };
 
   async function json(url, options = {}) {
     const response = await authFetch(url, { ...options, headers: {'Content-Type':'application/json', ...(options.headers || {})} });
@@ -18,6 +20,7 @@
       throw new Error('当前运行的后端不支持 AI 解释，请在 IDEA 停止并重新启动项目，再刷新页面重新提取。');
     let data;
     try { data = await response.json(); } catch (_) { throw new Error('服务器没有返回有效结果，请稍后重试'); }
+    await verifyVocabIdentity();
     if (!response.ok) throw new Error(data.error || '请求失败，请稍后重试');
     return data;
   }
@@ -31,8 +34,11 @@
     const q = $('query').value.trim().toLowerCase(), filter = $('filter').value;
     let list = rows();
     if (q) {
-      const exact = list.filter(r => r.word.w.toLowerCase() === q || (r.word.lemma || '').toLowerCase() === q);
-      list = exact.length ? exact : list.filter(r => (r.word.w+' '+(r.word.lemma || '')).toLowerCase().includes(q));
+      list = list.filter(row => {
+        const w = row.word, explanation = explanationOf(row);
+        return [w.w, w.lemma, w.cn, w.en, explanation?.cn, explanation?.en, ...(w.examples || [])]
+          .some(value => String(value || '').toLowerCase().includes(q));
+      });
     }
     return list.filter(r => filter === 'all' ? true : filter === 'selected' ? state.selected.has(r.key)
       : filter === 'missing' ? !(explanationOf(r)?.cn || r.word.cn) || !(explanationOf(r)?.en || r.word.en)
@@ -55,13 +61,18 @@
   function current(row) { return rows().some(r => r.key === row.key && r.word === row.word); }
 
   function saveArticle() {
+    if (!articleKey || identityStopped) return;
     try {
-      if ($('article').value) localStorage.setItem(ARTICLE_KEY, $('article').value);
-      else localStorage.removeItem(ARTICLE_KEY);
+      if ($('article').value) localStorage.setItem(articleKey, $('article').value);
+      else localStorage.removeItem(articleKey);
     } catch (_) { /* Browser draft is optional; server notebook has explicit error handling. */ }
   }
   function invalidate() {
     state.version++;
+    state.importTask?.controller.abort();
+    state.importTask = null;
+    $('btnImport').disabled = false;
+    $('btnImport').textContent = '导入文档';
     state.extractTask?.controller.abort();
     state.extractTask = null;
     for (const task of state.aiTasks.values()) task.controller.abort();
@@ -80,6 +91,37 @@
     state.words = []; state.snapshot = null; state.selected.clear(); state.contexts.clear();
     $('query').value = ''; $('charCount').textContent = '0 / 100000';
     $('clearDialog').close(); status('文章和提取结果已清空，生词本已保留。'); render(); $('article').focus();
+  }
+
+  async function importDocument() {
+    const file = $('documentFile').files[0];
+    $('documentFile').value = ''; // 同一文件修正后可再次选择。
+    if (!file || identityStopped) return;
+    if (file.size > 8 * 1024 * 1024) { status('文档不能超过 8 MB，请拆分后导入。', 'error'); return; }
+    if ($('article').value.trim() && !window.confirm('导入会替换当前文章和提取结果，已保存的生词本会保留。继续吗？')) return;
+    invalidate();
+    const task = {version:state.version, controller:new AbortController()}; state.importTask = task;
+    $('btnImport').disabled = true; $('btnImport').textContent = '正在导入…';
+    status('正在读取文档文字，请稍候；编辑文章可取消本次导入。');
+    try {
+      const form = new FormData(); form.append('file', file);
+      // 不手动填写 Content-Type：浏览器会为 multipart 加上正确的 boundary。
+      const response = await authFetch('/api/vocab/import', {method:'POST', body:form, signal:task.controller.signal});
+      const data = await response.json();
+      await verifyVocabIdentity();
+      if (!response.ok) throw new Error(data.error || '文档导入失败，请稍后重试');
+      if (state.importTask !== task || task.version !== state.version || identityStopped) return;
+      state.importTask = null;
+      $('article').value = data.text;
+      state.words = []; state.snapshot = null; state.selected.clear(); state.contexts.clear();
+      articleChanged(); saveArticle();
+      status(`已导入「${data.filename}」的 ${data.text.length} 个字符。检查上方文字后，点击「提取并查词」。`, 'success');
+      $('article').focus();
+    } catch (error) {
+      if (state.importTask === task && error.name !== 'AbortError') status('导入失败：'+error.message+'；原文章已保留。', 'error');
+    } finally {
+      if (state.importTask === task) { state.importTask = null; $('btnImport').disabled = false; $('btnImport').textContent = '导入文档'; }
+    }
   }
 
   async function extract() {
@@ -113,14 +155,28 @@
     finally { state.bookLoading = false; $('refreshBook').disabled = false; }
   }
   async function saveSelected() {
-    if (stale() || state.saving) return;
-    const selected = rows().filter(r => state.selected.has(r.key));
-    if (!selected.length || selected.length > 100) { status('每次请选择 1–100 个单词。', 'error'); return; }
-    const words = selected.map(snapshotWord); state.saving = true; actions();
+    if (identityStopped || stale() || state.saving || state.view !== 'article') return;
+    await saveRows(rows().filter(r => state.selected.has(r.key)));
+  }
+  async function saveAllWords() {
+    if (identityStopped || stale() || state.saving || state.view !== 'article') return;
+    const all = rows(); // 全部提取结果，不受搜索、筛选或“再显示”分页影响。
+    state.selected = new Set(all.map(row => row.key));
+    render();
+    await saveRows(all);
+  }
+  async function saveRows(selected) {
+    if (!selected.length) { status('请先提取并选择单词。', 'error'); return; }
+    if (selected.length > 5000) { status('一次最多加入 5000 条；本次没有保存，请减少勾选数量。', 'error'); return; }
+    const words = selected.map(snapshotWord), version = state.version;
+    state.saving = true; actions(); status(`正在加入 ${words.length} 个词条…`);
     try {
-      applyBook(await post('/api/vocab/book', {words}));
-      status('已加入生词本；相同单词与原句会去重，已有复习进度保留。', 'success'); render();
-    } catch (error) { status(error.message, 'error'); }
+      const data = await post('/api/vocab/book/bulk', {words});
+      if (identityStopped) return;
+      applyBook(data);
+      if (version === state.version) status(`已处理 ${words.length} 个词条；生词本现有 ${data.entries.length} 条。相同单词和原句已去重，已有复习进度保留。`, 'success');
+      render();
+    } catch (error) { if (!identityStopped && version === state.version) status('保存未确认：'+error.message+'。可刷新生词本核对后重试，相同单词和原句会自动去重。', 'error'); }
     finally { state.saving = false; actions(); }
   }
   async function replaceWord(row, word) {
@@ -221,7 +277,9 @@
     try {
       const response = await authFetch('/api/vocab/docx', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({words,mode})});
       if (!response.ok) { const error = await response.json(); throw new Error(error.error || '导出失败'); }
-      const url = URL.createObjectURL(await response.blob()), link = document.createElement('a');
+      const blob = await response.blob();
+      await verifyVocabIdentity();
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
       link.href = url; link.download = `单词手记_${mode === 'en' ? '英英' : '中文'}_${words.length}词.docx`;
       document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       if (version === state.version) status(`已导出 ${words.length} 个词条，内容以点击下载时的结果快照为准。`, 'success');
@@ -230,14 +288,19 @@
   }
 
   function actions() {
+    if (identityStopped) return;
     const list = filtered(), selected = rows().filter(r => state.selected.has(r.key)).length, count = exportRows().length;
     $('selectionCount').textContent = `已勾选 ${selected} 个`;
     $('selectAll').checked = !!list.length && list.every(r => state.selected.has(r.key));
     $('selectAll').indeterminate = list.some(r => state.selected.has(r.key)) && !$('selectAll').checked;
     $('selectAll').disabled = stale() || !list.length;
-    $('saveWords').disabled = stale() || !selected || selected > 100 || state.saving || state.view !== 'article';
+    $('saveWords').disabled = stale() || !selected || selected > 5000 || state.saving || state.view !== 'article';
     $('saveWords').hidden = state.view !== 'article';
-    $('saveWords').textContent = state.saving ? '正在保存…' : selected > 100 ? '每次最多保存 100 个' : '加入生词本';
+    $('saveWords').textContent = state.saving ? '正在保存…' : selected > 5000 ? '每次最多保存 5000 个' : '加入生词本';
+    $('saveAllWords').hidden = state.view !== 'article';
+    $('bulkHelp').hidden = state.view !== 'article';
+    $('saveAllWords').disabled = stale() || !state.words.length || state.saving || state.words.length > 5000;
+    $('saveAllWords').textContent = state.saving ? '正在保存…' : '全选并加入生词本';
     $('btnDownload').disabled = stale() || !count || state.downloading;
     $('exportCount').textContent = count;
     $('staleNotice').hidden = !(state.words.length && state.snapshot !== $('article').value.trim());
@@ -269,9 +332,13 @@
     </article>`;
   }
   function render() {
+    if (identityStopped) return;
     $('articlePanel').hidden = state.view !== 'article';
     $('resultsTitle').textContent = {article:'挑出值得记住的词',book:'每一个词，都有来处',review:'把昨天遇见的，再想一遍'}[state.view];
-    const list = filtered(); $('wordList').innerHTML = list.slice(0,state.limit).map(card).join('');
+    $('searchLabel').textContent = {article:'查找文章中的单词',book:'查找我的生词本',review:'查找今日待复习词'}[state.view];
+    const list = filtered();
+    $('searchCount').textContent = `找到 ${list.length} / ${rows().length} 条（包含尚未展开的词条）`;
+    $('wordList').innerHTML = list.slice(0,state.limit).map(card).join('');
     $('showMore').hidden = list.length <= state.limit;
     $('stats').textContent = `${list.length} / ${rows().length} 个词条`;
     $('emptyState').hidden = !!list.length;
@@ -285,11 +352,42 @@
       if (active) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current');
     }); actions();
   }
-  document.addEventListener('DOMContentLoaded', () => {
-    try { $('article').value = localStorage.getItem(ARTICLE_KEY) || ''; } catch (_) { }
+  window.addEventListener('vocab-identity-changed', () => {
+    identityStopped = true;
+    Object.values(searches).forEach(search=>{search.query='';search.filter='all';});
+    document.body.inert = true;
+    invalidate();
+    clearTimeout(saveTimer);
+    state.words = []; state.book = []; state.selected.clear(); state.contexts.clear();
+    state.snapshot = null;
+    editTarget = deleteTarget = contextTarget = null;
+    articleKey = null;
+    document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    document.querySelectorAll('input, textarea').forEach(input => {
+      input.value = ''; input.checked = false;
+    });
+    $('wordList').replaceChildren();
+    $('bookCount').textContent = '—'; $('dueCount').textContent = '—';
+    $('charCount').textContent = '0 / 100000'; $('selectionCount').textContent = '';
+    $('status').textContent = '登录身份已变化，请刷新页面后继续。';
+    $('status').className = 'error';
+    document.querySelectorAll('button, input, textarea, select').forEach(input => { input.disabled = true; });
+  });
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const ownerId = await initVocabIdentity();
+      articleKey = 'vocab.article.v2.' + ownerId;
+      // 旧版共用草稿归属不明，不导入到当前账号。
+    } catch (_) { return; }
+    try { $('article').value = localStorage.getItem(articleKey) || ''; } catch (_) { }
     $('charCount').textContent = `${$('article').value.length} / 100000`;
     $('article').addEventListener('input',articleChanged); window.addEventListener('pagehide',saveArticle);
+    $('btnImport').addEventListener('click',()=>$('documentFile').click());
+    $('documentFile').addEventListener('change',importDocument);
     $('btnExtract').addEventListener('click',extract); $('btnClear').addEventListener('click',()=>$('clearDialog').showModal());
+    $('saveAllWords').addEventListener('click',saveAllWords);
+    $('clearSearch').addEventListener('click',()=>{$('query').value='';state.limit=40;render();$('query').focus();});
     $('confirmClear').addEventListener('click',clearArticle); $('saveWords').addEventListener('click',saveSelected);
     $('btnDownload').addEventListener('click',download); $('refreshBook').addEventListener('click',loadBook);
     $('cancelEdit').addEventListener('click',()=>$('editDialog').close()); $('editForm').addEventListener('submit',saveEdit);
@@ -301,7 +399,9 @@
     $('selectAll').addEventListener('change',()=>{filtered().forEach(row=>$('selectAll').checked?state.selected.add(row.key):state.selected.delete(row.key));render();});
     $('showMore').addEventListener('click',()=>{state.limit+=40;render();});
     document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>{
-      state.view=button.dataset.view;state.selected.clear();state.limit=40;$('query').value='';$('filter').value='all';
+      searches[state.view] = {query:$('query').value, filter:$('filter').value};
+      state.view=button.dataset.view;state.selected.clear();state.limit=40;
+      $('query').value=searches[state.view].query;$('filter').value=searches[state.view].filter;
       status(state.view==='review'?'先回想，再展开释义；按真实掌握情况反馈。':'');render();if(state.view!=='article')loadBook();
     }));
     $('wordList').addEventListener('change',event=>{

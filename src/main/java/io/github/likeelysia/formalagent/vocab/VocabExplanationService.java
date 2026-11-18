@@ -25,6 +25,10 @@ public class VocabExplanationService {
     }
 
     public VocabService.Explanation explain(VocabService.Word word, String level, String example) {
+        return explain("legacy", word, level, example);
+    }
+
+    public VocabService.Explanation explain(String ownerId, VocabService.Word word, String level, String example) {
         VocabService.validateWord(word);
         String difficulty = level == null ? "simple" : level;
         if (!List.of("simple", "standard").contains(difficulty)) throw new AgentException("请选择简单或标准英语");
@@ -32,7 +36,7 @@ public class VocabExplanationService {
             throw new AgentException("请提供该词的来源原句，最多 400 字符");
         String key;
         try {
-            key = mapper.writeValueAsString(List.of(VERSION, word.w(), example, difficulty,
+            key = mapper.writeValueAsString(List.of(ownerId, VERSION, word.w(), example, difficulty,
                     safe(word.cn(), 1500), safe(word.en(), 4000)));
         } catch (Exception e) { throw new AgentException("无法准备词条解释", e); }
         synchronized (cache) {

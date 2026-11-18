@@ -7,3 +7,5 @@ dialog{border:1px solid var(--line);border-radius:10px;padding:25px;background:v
 @media(max-width:720px){.desk{padding:20px 14px}.page-head{margin-bottom:20px}h1{font-size:25px;letter-spacing:1px}.desk-stamp{font-size:15px;padding:8px 9px;letter-spacing:3px;margin-right:8px}.paper{padding:20px 16px}.word-list{grid-template-columns:1fr}.tabs{gap:4px}.tabs button{padding:7px 9px;font-size:12px}.tabs .quiet{margin-left:0}.article-actions span{margin-left:0;width:100%}.toolbar label:not(.search){flex:1;min-width:120px}.toolbar select{width:100%}.section-head{align-items:flex-start}.selection-bar{gap:9px}.word-card{padding:16px}.export-bar>div{flex-basis:100%}.export-bar select{font-size:12px}}
 
 .ai-error,#contextError{color:var(--error);font-size:12px;overflow-wrap:anywhere}#contextInput{width:100%;padding:9px 11px}
+
+.search>span{display:block;font-size:13px;color:var(--green);margin-bottom:5px}.toolbar{align-items:flex-end}.selection-bar #saveAllWords{margin-left:0}#searchCount{margin:0 0 10px}#bulkHelp{margin:10px 0}

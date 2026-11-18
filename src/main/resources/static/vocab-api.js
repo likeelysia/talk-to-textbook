@@ -13,6 +13,48 @@
     var CSRF_COOKIE = 'XSRF-TOKEN';
     var CSRF_HEADER = 'X-XSRF-TOKEN';
 
+    var ownerId = null;
+    var invalid = false;
+
+    function rejectIdentity() {
+        if (!invalid) {
+            invalid = true;
+            global.dispatchEvent(new Event('vocab-identity-changed'));
+        }
+        throw new Error('登录身份已变化，请刷新页面后继续');
+    }
+
+    async function readIdentity() {
+        var res = await fetch('/api/auth/me', {credentials:'same-origin', cache:'no-store'});
+        if (!res.ok) return rejectIdentity();
+        var me = await res.json();
+        if (!me.authenticated || !me.userId) return rejectIdentity();
+        return me.userId;
+    }
+
+    async function initIdentity() {
+        ownerId = await readIdentity();
+        return ownerId;
+    }
+
+    async function verifyIdentity() {
+        if (invalid || !ownerId) return rejectIdentity();
+        if (await readIdentity() !== ownerId || invalid) return rejectIdentity();
+    }
+
+    global.initVocabIdentity = initIdentity;
+    global.verifyVocabIdentity = verifyIdentity;
+    ['focus', 'pageshow'].forEach(function (name) {
+        global.addEventListener(name, function () {
+            if (ownerId && !invalid) verifyIdentity().catch(function () {});
+        });
+    });
+    global.addEventListener('storage', function (event) {
+        if (event.key === 'fa.authSignal' && ownerId && !invalid) {
+            verifyIdentity().catch(function () {});
+        }
+    });
+
     function readCookie(name) {
         var prefix = name + '=';
         var parts = document.cookie.split(';');
@@ -46,6 +88,7 @@
     }
 
     async function authFetch(url, options) {
+        await verifyIdentity();
         var opts = Object.assign({credentials: 'same-origin'}, options || {});
         var method = String(opts.method || 'GET').toUpperCase();
 
@@ -57,7 +100,10 @@
             });
         }
 
+        opts.headers = Object.assign({}, opts.headers || {}, {'X-Vocab-Owner':ownerId});
         var res = await fetch(url, opts);
+        if (res.status === 409 || res.status === 401) return rejectIdentity();
+        await verifyIdentity();
         if (res.status === 401) {
             redirectToLogin();
             throw new Error('登录已过期，请重新登录');

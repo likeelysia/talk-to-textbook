@@ -26,10 +26,6 @@ public class UserAccessFilter extends OncePerRequestFilter {
             return;
         }
         String path = request.getRequestURI();
-        if (path.equals("/vocab.html")) {
-            response.sendRedirect("/notes.html");
-            return;
-        }
         if (path.startsWith("/api/") && !allowed(request, path)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
@@ -48,6 +44,24 @@ public class UserAccessFilter extends OncePerRequestFilter {
                 || path.equals("/api/knowledge/page") || path.equals("/api/knowledge/item")) {
             return "GET".equals(m);
         }
+        if (path.equals("/api/vocab/import")) {
+            String type = r.getContentType();
+            return "POST".equals(m) && type != null
+                    && "multipart/form-data".equalsIgnoreCase(type.split(";", 2)[0].trim());
+        }
+        if (path.equals("/api/vocab/book/bulk")) {
+            return "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.equals("/api/vocab/book")) {
+            return "GET".equals(m) || "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.equals("/api/vocab/extract") || path.equals("/api/vocab/explain")
+                || path.equals("/api/vocab/docx") || path.matches("/api/vocab/book/[A-Za-z0-9-]{1,40}/review")) {
+            return "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.matches("/api/vocab/book/[A-Za-z0-9-]{1,40}")) {
+            return "DELETE".equals(m) || "PATCH".equals(m) && isJson(r.getContentType());
+        }
         if (path.equals("/api/conversations")) return "GET".equals(m) || "POST".equals(m);
         if (path.matches("/api/conversations/[A-Za-z0-9_-]{1,40}")) {
             return "GET".equals(m) || "PATCH".equals(m) || "DELETE".equals(m);
@@ -55,7 +69,13 @@ public class UserAccessFilter extends OncePerRequestFilter {
         if (path.matches("/api/conversations/[A-Za-z0-9_-]{1,40}/memory-scope")) {
             return "PUT".equals(m);
         }
-        if (path.equals("/api/agent") || path.equals("/api/agent/stream")) {
+        if (path.equals("/api/agent")) {
+            String type = r.getContentType();
+            boolean multipart = type != null
+                    && "multipart/form-data".equalsIgnoreCase(type.split(";", 2)[0].trim());
+            return "POST".equals(m) && (isJson(type) || multipart);
+        }
+        if (path.equals("/api/agent/stream")) {
             return "POST".equals(m) && isJson(r.getContentType());
         }
         if (path.equals("/api/memory")) return "GET".equals(m) || "POST".equals(m) || "DELETE".equals(m);

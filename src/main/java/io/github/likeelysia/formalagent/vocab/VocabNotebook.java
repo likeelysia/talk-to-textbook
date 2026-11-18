@@ -22,7 +22,8 @@ import org.springframework.stereotype.Component;
 /** Single-user study archive, separate from decaying Agent memories. Fail closed on corrupt files. */
 @Component
 public class VocabNotebook {
-    private static final int MAX_ENTRIES = 1000;
+    private static final int MAX_ENTRIES = 10_000;
+    private static final int MAX_BULK_WORDS = 5000;
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private final ObjectMapper mapper;
     private final Path file;
@@ -45,21 +46,40 @@ public class VocabNotebook {
     public synchronized Book list() { return new Book(List.copyOf(read()), clock.millis()); }
 
     public synchronized Book save(List<VocabService.Word> words) {
-        if (words == null || words.isEmpty() || words.size() > 100)
-            throw new AgentException("每次请选择 1–100 个单词加入生词本");
+        return saveValidated(words, 100);
+    }
+
+    /** 一键保存：整批校验、去重和容量检查后只写一次，失败时不会存入一半。 */
+    public synchronized Book saveBulk(List<VocabService.Word> words) {
+        return saveValidated(words, MAX_BULK_WORDS);
+    }
+
+    private Book saveValidated(List<VocabService.Word> words, int limit) {
+        if (words == null || words.isEmpty() || words.size() > limit)
+            throw new AgentException("每次请选择 1–" + limit + " 个单词加入生词本；生词本容量为 " + MAX_ENTRIES + " 条");
         words.forEach(VocabService::validateWord);
         List<Entry> entries = read();
+        int originalSize = entries.size();
+        // 为同词同原句建立索引，避免几千词逐条扫描整本生词本。
+        var index = new java.util.HashMap<Meaning, Integer>();
+        for (int i = 0; i < entries.size(); i++) index.putIfAbsent(meaning(entries.get(i).word()), i);
         for (var word : words) {
-            int found = -1;
-            for (int i = 0; i < entries.size(); i++) if (sameMeaning(entries.get(i).word(), word)) { found = i; break; }
-            if (found < 0) entries.add(0, new Entry(UUID.randomUUID().toString(), word, clock.millis(),
-                    clock.millis(), 0, 0, List.of()));
-            else if (word.explanation() != null) {
+            Meaning key = meaning(word);
+            Integer found = index.get(key);
+            if (found == null) {
+                index.put(key, entries.size());
+                entries.add(new Entry(UUID.randomUUID().toString(), word, clock.millis(), clock.millis(), 0, 0, List.of()));
+            } else if (word.explanation() != null) {
                 Entry old = entries.get(found);
                 entries.set(found, new Entry(old.id(), word, old.savedAt(), old.dueAt(), old.streak(), old.reviewCount(), old.history()));
             }
         }
         if (entries.size() > MAX_ENTRIES) throw new AgentException("生词本最多保存 " + MAX_ENTRIES + " 条，请先整理或删除旧条目");
+        // 新条目仍放在最前，与旧版顺序保持一致；同一批只重排一次。
+        List<Entry> ordered = new ArrayList<>(entries.size());
+        for (int i = entries.size() - 1; i >= originalSize; i--) ordered.add(entries.get(i));
+        ordered.addAll(entries.subList(0, originalSize));
+        entries = ordered;
         write(entries);
         return new Book(List.copyOf(entries), clock.millis());
     }
@@ -108,6 +128,9 @@ public class VocabNotebook {
         write(entries);
     }
 
+    private record Meaning(String word, List<String> examples) { }
+    private Meaning meaning(VocabService.Word word) { return new Meaning(word.w().toLowerCase(Locale.ROOT), word.examples()); }
+
     private boolean sameMeaning(VocabService.Word a, VocabService.Word b) {
         return a.w().toLowerCase(Locale.ROOT).equals(b.w().toLowerCase(Locale.ROOT)) && a.examples().equals(b.examples());
     }
@@ -142,3 +165,4 @@ public class VocabNotebook {
         finally { if (temp != null) try { Files.deleteIfExists(temp); } catch (IOException ignored) { } }
     }
 }
+

@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>单词手记 · 灯下</title>
-  <link rel="stylesheet" href="/vocab.css?v=20261024-context">
-  <script src="/vocab-api.js" defer></script>
-  <script src="/vocab.js?v=20261024-context" defer></script>
+  <link rel="stylesheet" href="/vocab.css?v=20261113-capacity">
+  <script src="/vocab-api.js?v=20261113-capacity" defer></script>
+  <script src="/vocab.js?v=20261113-capacity" defer></script>
 </head>
 <body>
 <main class="desk">
@@ -24,25 +24,31 @@
     <div class="section-head"><div><p class="eyebrow">01 / READ & COLLECT</p><h2 id="articleTitle">今天读了什么？</h2></div><span class="small" id="charCount">0 / 100000</span></div>
     <label class="sr-only" for="article">粘贴英文文章</label>
     <textarea id="article" maxlength="100000" placeholder="粘贴一段英文文章。支持 Don’t、I’m 和 state-of-the-art 这样的词。"></textarea>
-    <div class="article-actions"><button id="btnExtract" class="primary" type="button">提取并查词</button><button id="btnClear" class="quiet" type="button">清空文章</button><span class="small">普通查词使用词典，不调用 AI。</span></div>
+    <input id="documentFile" type="file" hidden accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv,.tsv,.html,.htm,.rtf">
+    <div class="article-actions"><button id="btnImport" type="button">导入文档</button><button id="btnExtract" class="primary" type="button">提取并查词</button><button id="btnClear" class="quiet" type="button">清空文章</button><span class="small">普通查词使用词典，不调用 AI。</span></div>
+    <p class="small">支持 PDF（文字版）、Word（DOCX）、PPTX、Excel（XLSX / XLS）、TXT、Markdown、CSV / TSV、HTML、RTF。单份最多 8 MB、10 万字符，PDF 最多 150 页。导入后可先检查文字，再点击「提取并查词」。</p>
+    <p class="small">扫描件、图片需先识别文字；旧版 DOC / PPT 请先另存为 DOCX / PPTX。原文件不进入知识库或生词本，只有勾选后保存的词条会加入当前账号的生词本。</p>
     <p class="notice" id="staleNotice" hidden>文章已修改，下面是上一版结果。重新提取后才能保存或导出。</p>
   </section>
   <section class="paper results" aria-labelledby="resultsTitle">
     <div class="section-head"><div><p class="eyebrow">02 / KEEP WHAT MATTERS</p><h2 id="resultsTitle">挑出值得记住的词</h2></div><span class="small" id="stats">先粘贴一段文章</span></div>
     <div id="status" role="status" aria-live="polite">词典原文、AI 补充和手动修改会分别标注。</div>
     <div class="toolbar">
-      <label class="search"><span class="sr-only">搜索单词或原形</span><input id="query" type="search" placeholder="搜索单词或原形…" autocomplete="off"></label>
+      <label class="search"><span id="searchLabel">查找文章中的单词</span><input id="query" type="search" placeholder="输入英文单词、中文释义或原句…" autocomplete="off"></label>
+      <button id="clearSearch" type="button" class="quiet">清除查找</button>
       <label><span class="sr-only">筛选范围</span><select id="filter"><option value="all">全部词条</option><option value="missing">缺少中文或英文</option><option value="selected">已勾选</option><option value="四级">含四级标签</option><option value="六级">含六级标签</option><option value="考研">含考研标签</option></select></label>
       <label><span class="sr-only">显示方式</span><select id="mode"><option value="en">英文释义 · 中文辅助</option><option value="cn">中文释义</option></select></label>
       <label><span class="sr-only">AI 解释方式</span><select id="level"><option value="simple">解释方式：更易懂</option><option value="standard">解释方式：更详细</option></select></label>
     </div>
-    <div class="selection-bar"><label><input type="checkbox" id="selectAll"> 勾选当前筛选结果</label><span id="selectionCount" class="small">已勾选 0 个</span><button id="saveWords" type="button" class="primary" disabled>加入生词本</button></div>
+    <p id="searchCount" class="small" role="status" aria-live="polite"></p>
+    <div class="selection-bar"><label><input type="checkbox" id="selectAll"> 勾选当前筛选结果</label><span id="selectionCount" class="small">已勾选 0 个</span><button id="saveWords" type="button" class="primary" disabled>加入生词本</button><button id="saveAllWords" type="button" class="primary" disabled>全选并加入生词本</button></div>
+    <p id="bulkHelp" class="small">一键加入文章全部提取词条（包括尚未展开的词）；相同单词和原句自动去重，保留复习进度。每次最多加入 5000 条，生词本最多 10000 条；超限时整批不保存。</p>
     <div id="wordList" class="word-list"></div>
     <div id="emptyState" class="empty-state"><span aria-hidden="true">✧</span><h3>从一段阅读开始</h3><p>提取后勾选生词，连同原句一起保存。明天打开，还能接着复习。</p></div>
     <button id="showMore" class="quiet more" type="button" hidden>再显示 40 个</button>
     <div class="export-bar"><div><strong>带着词表继续学</strong><p class="small">导出当前显示模式对应的释义与原句。</p></div><label><span class="sr-only">导出范围</span><select id="exportScope"><option value="visible">当前筛选结果</option><option value="selected">全部已勾选</option><option value="all">当前视图全部</option></select></label><button id="btnDownload" type="button" disabled>下载 Word <span id="exportCount">0</span> 词</button></div>
   </section>
-  <footer><p>文章草稿保存在当前浏览器；生词本保存在部署此应用的服务器，使用同一账号可继续学习。</p><p>查词由服务器读取 ECDICT 完成。只有点击「AI 解释」时，所选词条和原句才会发送至模型服务；AI 内容需自行核对。</p><p>复习采用基础间隔规则：不会 10 分钟后，模糊 1 天后，连续掌握逐步延至 1 / 3 / 7 / 14 / 30 天。</p></footer>
+  <footer><p>文章草稿按账号保存在当前浏览器；生词本与复习记录按账号保存在服务器，使用同一账号可继续学习。</p><p>查词由服务器读取 ECDICT 完成。只有点击「AI 解释」时，所选词条和原句才会发送至模型服务；AI 内容需自行核对。</p><p>复习采用基础间隔规则：不会 10 分钟后，模糊 1 天后，连续掌握逐步延至 1 / 3 / 7 / 14 / 30 天。</p></footer>
 </main>
 <dialog id="clearDialog"><form method="dialog"><h2>清空这篇文章？</h2><p>会清除当前草稿和提取结果，已保存的生词本会保留。</p><div class="dialog-actions"><button value="cancel">保留文章</button><button id="confirmClear" type="button" class="primary">清空</button></div></form></dialog>
 <dialog id="editDialog"><form id="editForm"><h2 id="editTitle">手动填写释义</h2><p class="small">填写你核对过的解释，至少保留一种语言。词典原文会保留。</p><label>中文辅助<textarea id="editCn" maxlength="600" rows="3"></textarea></label><label>简单英文<textarea id="editEn" maxlength="1200" rows="4"></textarea></label><div id="editError" role="alert"></div><div class="dialog-actions"><button type="button" id="cancelEdit">取消</button><button type="submit" class="primary" id="saveEdit">保存修改</button></div></form></dialog>
