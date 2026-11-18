@@ -377,3 +377,17 @@ variables, and `.gitignore` blocks common secret files as well as generated data
 ## 许可证 / License
 
 [MIT](./LICENSE) © 2026 likeelysia
+
+### 联网补查
+
+在「学习桌」勾选「联网补查」后提交文字问题。开关按账号保存在当前浏览器，刷新页面后仍有效，手动取消可关闭。模型先看教材检索结果，再判断证据是否足够。后端每轮最多允许一次网页工具调用，关闭时拒绝调用。
+
+使用 Tavily 时，在应用的环境变量中填入 `FA_TAVILY_API_KEY` 并重启。项目会使用 Tavily 官方 MCP 地址和 `tavily_search` 工具。使用其他服务时，配置下表参数。Docker Compose 部署可通过项目的 `.env` 文件传入。
+
+| 变量 | 作用 |
+| --- | --- |
+| `FA_WEB_MCP_URL` | 远程搜索 MCP 的 HTTPS Streamable HTTP 端点 |
+| `FA_WEB_MCP_TOOL` | 服务端搜索工具名，默认 `web_search`，须接收 `query` 字符串 |
+| `FA_WEB_MCP_TOKEN` | 服务端要求的 Bearer 令牌，按服务要求设置 |
+
+建议选用返回标题、URL 和摘要的工具。用一条教材内题、一条时效题分别试跑，再关掉按钮重复时效题。流式回答在实际调用网页工具时显示「正在联网补查」。聊天记录会保留回答，网页工具回答跳过长期记忆提炼。搜索服务不可达、未配置或返回错误时，Agent 会收到对应的失败说明。
