@@ -9,3 +9,11 @@ dialog{border:1px solid var(--line);border-radius:10px;padding:25px;background:v
 .ai-error,#contextError{color:var(--error);font-size:12px;overflow-wrap:anywhere}#contextInput{width:100%;padding:9px 11px}
 
 .search>span{display:block;font-size:13px;color:var(--green);margin-bottom:5px}.toolbar{align-items:flex-end}.selection-bar #saveAllWords{margin-left:0}#searchCount{margin:0 0 10px}#bulkHelp{margin:10px 0}
+
+.day-bar{border:1px solid var(--line);border-radius:8px;padding:10px;margin:0 0 12px;background:#fbf9f2}.day-buttons{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.day-buttons button{padding:5px 10px}.day-buttons button.active{background:var(--green);color:#fff}.day-pager{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.star-mark{color:#d9a300;font-size:20px;line-height:1;margin-left:2px}.card-actions button.starred{background:#fff6dc;border-color:#e7c46a;color:#8a6d37}
+
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:80;max-width:min(90vw,460px);padding:10px 16px;border-radius:999px;background:#274d3a;color:#fff;font-size:13px;box-shadow:0 8px 28px rgba(0,0,0,.2)}.toast[hidden]{display:none}
+
+.custom-badge{display:inline-block;font-size:10px;color:#7a5a13;border:1px solid #e7c46a;border-radius:4px;padding:0 5px;background:#fff8e6}

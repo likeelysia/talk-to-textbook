@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>单词手记 · 灯下</title>
-  <link rel="stylesheet" href="/vocab.css?v=20261113-capacity">
+  <link rel="stylesheet" href="/vocab.css?v=20261124-startop">
+  <script src="/vocab-search.js?v=20261116-fuzzy2" defer></script>
   <script src="/vocab-api.js?v=20261113-capacity" defer></script>
-  <script src="/vocab.js?v=20261113-capacity" defer></script>
+  <script src="/vocab.js?v=20261124-startop" defer></script>
 </head>
 <body>
 <main class="desk">
@@ -21,12 +22,12 @@
     <button type="button" id="refreshBook" class="quiet">刷新生词本</button>
   </nav>
   <section class="paper article-panel" id="articlePanel" aria-labelledby="articleTitle">
-    <div class="section-head"><div><p class="eyebrow">01 / READ & COLLECT</p><h2 id="articleTitle">今天读了什么？</h2></div><span class="small" id="charCount">0 / 100000</span></div>
+    <div class="section-head"><div><p class="eyebrow">01 / READ & COLLECT</p><h2 id="articleTitle">今天读了什么？</h2></div><span class="small" id="charCount">0 / 200000</span></div>
     <label class="sr-only" for="article">粘贴英文文章</label>
-    <textarea id="article" maxlength="100000" placeholder="粘贴一段英文文章。支持 Don’t、I’m 和 state-of-the-art 这样的词。"></textarea>
+    <textarea id="article" maxlength="200000" placeholder="粘贴一段英文文章。支持 Don’t、I’m 和 state-of-the-art 这样的词。"></textarea>
     <input id="documentFile" type="file" hidden accept=".pdf,.docx,.pptx,.xlsx,.xls,.txt,.md,.csv,.tsv,.html,.htm,.rtf">
     <div class="article-actions"><button id="btnImport" type="button">导入文档</button><button id="btnExtract" class="primary" type="button">提取并查词</button><button id="btnClear" class="quiet" type="button">清空文章</button><span class="small">普通查词使用词典，不调用 AI。</span></div>
-    <p class="small">支持 PDF（文字版）、Word（DOCX）、PPTX、Excel（XLSX / XLS）、TXT、Markdown、CSV / TSV、HTML、RTF。单份最多 8 MB、10 万字符，PDF 最多 150 页。导入后可先检查文字，再点击「提取并查词」。</p>
+    <p class="small">支持 PDF（文字版）、Word（DOCX）、PPTX、Excel（XLSX / XLS）、TXT、Markdown、CSV / TSV、HTML、RTF。单份最多 8 MB、20 万字符，PDF 最多 150 页。导入后可先检查文字，再点击「提取并查词」。</p>
     <p class="small">扫描件、图片需先识别文字；旧版 DOC / PPT 请先另存为 DOCX / PPTX。原文件不进入知识库或生词本，只有勾选后保存的词条会加入当前账号的生词本。</p>
     <p class="notice" id="staleNotice" hidden>文章已修改，下面是上一版结果。重新提取后才能保存或导出。</p>
   </section>
@@ -34,14 +35,18 @@
     <div class="section-head"><div><p class="eyebrow">02 / KEEP WHAT MATTERS</p><h2 id="resultsTitle">挑出值得记住的词</h2></div><span class="small" id="stats">先粘贴一段文章</span></div>
     <div id="status" role="status" aria-live="polite">词典原文、AI 补充和手动修改会分别标注。</div>
     <div class="toolbar">
-      <label class="search"><span id="searchLabel">查找文章中的单词</span><input id="query" type="search" placeholder="输入英文单词、中文释义或原句…" autocomplete="off"></label>
+      <label class="search"><span id="searchLabel">查找文章中的单词</span><input id="query" type="search" placeholder="输入英文单词或中文释义…" autocomplete="off"></label>
       <button id="clearSearch" type="button" class="quiet">清除查找</button>
       <label><span class="sr-only">筛选范围</span><select id="filter"><option value="all">全部词条</option><option value="missing">缺少中文或英文</option><option value="selected">已勾选</option><option value="四级">含四级标签</option><option value="六级">含六级标签</option><option value="考研">含考研标签</option></select></label>
-      <label><span class="sr-only">显示方式</span><select id="mode"><option value="en">英文释义 · 中文辅助</option><option value="cn">中文释义</option></select></label>
+      <label><span class="sr-only">显示方式</span><select id="mode"><option value="cn" selected>中文释义</option><option value="en">英文释义 · 中文辅助</option></select></label>
       <label><span class="sr-only">AI 解释方式</span><select id="level"><option value="simple">解释方式：更易懂</option><option value="standard">解释方式：更详细</option></select></label>
     </div>
     <p id="searchCount" class="small" role="status" aria-live="polite"></p>
-    <div class="selection-bar"><label><input type="checkbox" id="selectAll"> 勾选当前筛选结果</label><span id="selectionCount" class="small">已勾选 0 个</span><button id="saveWords" type="button" class="primary" disabled>加入生词本</button><button id="saveAllWords" type="button" class="primary" disabled>全选并加入生词本</button></div>
+    <div id="dayBar" class="day-bar" hidden>
+      <div id="dayButtons" class="day-buttons"></div>
+      <div class="day-pager"><button id="dayPrev" type="button" class="quiet">上一页</button><span id="dayPageLabel" class="small"></span><button id="dayNext" type="button" class="quiet">下一页</button><button id="newPlan" type="button">新建天数计划</button></div>
+    </div>
+    <div class="selection-bar"><label><input type="checkbox" id="selectAll"> 勾选当前筛选结果</label><span id="selectionCount" class="small">已勾选 0 个</span><button id="saveWords" type="button" class="primary" disabled>加入生词本</button><button id="saveAllWords" type="button" class="primary" disabled>全选并加入生词本</button><button id="queueReview" type="button" class="primary" disabled hidden>加入今日复习</button></div>
     <p id="bulkHelp" class="small">一键加入文章全部提取词条（包括尚未展开的词）；相同单词和原句自动去重，保留复习进度。每次最多加入 5000 条，生词本最多 10000 条；超限时整批不保存。</p>
     <div id="wordList" class="word-list"></div>
     <div id="emptyState" class="empty-state"><span aria-hidden="true">✧</span><h3>从一段阅读开始</h3><p>提取后勾选生词，连同原句一起保存。明天打开，还能接着复习。</p></div>
@@ -51,8 +56,11 @@
   <footer><p>文章草稿按账号保存在当前浏览器；生词本与复习记录按账号保存在服务器，使用同一账号可继续学习。</p><p>查词由服务器读取 ECDICT 完成。只有点击「AI 解释」时，所选词条和原句才会发送至模型服务；AI 内容需自行核对。</p><p>复习采用基础间隔规则：不会 10 分钟后，模糊 1 天后，连续掌握逐步延至 1 / 3 / 7 / 14 / 30 天。</p></footer>
 </main>
 <dialog id="clearDialog"><form method="dialog"><h2>清空这篇文章？</h2><p>会清除当前草稿和提取结果，已保存的生词本会保留。</p><div class="dialog-actions"><button value="cancel">保留文章</button><button id="confirmClear" type="button" class="primary">清空</button></div></form></dialog>
-<dialog id="editDialog"><form id="editForm"><h2 id="editTitle">手动填写释义</h2><p class="small">填写你核对过的解释，至少保留一种语言。词典原文会保留。</p><label>中文辅助<textarea id="editCn" maxlength="600" rows="3"></textarea></label><label>简单英文<textarea id="editEn" maxlength="1200" rows="4"></textarea></label><div id="editError" role="alert"></div><div class="dialog-actions"><button type="button" id="cancelEdit">取消</button><button type="submit" class="primary" id="saveEdit">保存修改</button></div></form></dialog>
+<dialog id="editDialog"><form id="editForm"><h2 id="editTitle">手动填写释义</h2><p class="small">填写你核对过的解释；词性和释义会标注“自定义”，不覆盖词典原文。至少保留一种语言释义。</p><label>自定义词性<input id="editPos" maxlength="40" placeholder="如 n. 名词 / v. 动词"></label><label>中文辅助<textarea id="editCn" maxlength="600" rows="3"></textarea></label><label>简单英文<textarea id="editEn" maxlength="1200" rows="4"></textarea></label><div id="editError" role="alert"></div><div class="dialog-actions"><button type="button" id="cancelEdit">取消</button><button type="submit" class="primary" id="saveEdit">保存修改</button></div></form></dialog>
 <dialog id="deleteDialog"><form method="dialog"><h2>移出这条生词？</h2><p>这条生词及其复习记录会被删除，同词的其他原句条目会保留。</p><div class="dialog-actions"><button value="cancel">保留</button><button type="button" id="confirmDelete" class="danger">移出生词本</button></div></form></dialog>
 <dialog id="contextDialog"><form id="contextForm"><h2 id="contextTitle">补充来源原句</h2><p class="small">请粘贴含有该词的英文原句。确认后保存原句，并调用已配置的模型生成中英文解释。</p><label for="contextInput">来源原句</label><textarea id="contextInput" maxlength="400" rows="4" required></textarea><div id="contextError" role="alert"></div><div class="dialog-actions"><button type="button" id="cancelContext">取消</button><button type="submit" class="primary" id="useContext">使用此原句并生成</button></div></form></dialog>
+<dialog id="planDialog"><form id="planForm"><h2>新建天数计划</h2><p class="small">最多 180 天，每天最多 200 个词。已有词条安排在第 N 天时，计划不能少于 N 天。</p><label>计划天数<input id="planDays" type="number" min="1" max="180" value="30" required></label><div id="planError" role="alert"></div><div class="dialog-actions"><button type="button" id="cancelPlan">取消</button><button type="submit" class="primary">创建计划</button></div></form></dialog>
+<dialog id="queueDialog"><form method="dialog"><h2>加入今日复习</h2><p class="small" id="queueHint"></p><div id="queueDays" class="day-buttons"></div><div class="day-pager"><button id="queuePrev" type="button" class="quiet">上一页</button><span id="queuePageLabel" class="small"></span><button id="queueNext" type="button" class="quiet">下一页</button><button id="queueNewPlan" type="button">新建计划</button></div><div class="dialog-actions"><button id="queueCancel" value="cancel">取消</button><button id="queueDirect" type="button" class="primary">直接加入今日复习</button><button id="queueConfirm" type="button" class="primary">加入第 1 天</button></div></form></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
