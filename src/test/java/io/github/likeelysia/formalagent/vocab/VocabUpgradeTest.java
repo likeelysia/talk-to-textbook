@@ -49,7 +49,7 @@ class VocabUpgradeTest {
         var service = new VocabService(fake(),2);
         assertThatThrownBy(()->service.extract("a b c")).hasMessageContaining("最多提取");
         assertThatThrownBy(()->service.extract("这是中文 123")).hasMessageContaining("没有识别到");
-        assertThatThrownBy(()->service.extract("a".repeat(100001))).hasMessageContaining("字符");
+        assertThatThrownBy(()->service.extract("a".repeat(200001))).hasMessageContaining("字符");
     }
     @Test void snapshotExportContainsOnlySelectedWordsAndMarksSources() throws Exception {
         var service = new VocabService(fake(),100);

@@ -33,6 +33,9 @@ public class VocabDocumentImporter {
     private final Semaphore parserSlot = new Semaphore(1);
 
     public record ImportedDocument(String filename, String text) { }
+    /** Excel 按非空行分批读取；offset 以非空行计数，避免一次生成整本字符串。 */
+    public record SheetBatch(String filename, String text, int offset, int nextOffset,
+                             int totalRows, boolean done) { }
 
     public ImportedDocument read(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new AgentException("请选择非空文档");
@@ -74,6 +77,65 @@ public class VocabDocumentImporter {
         } finally {
             parserSlot.release();
         }
+    }
+
+    public SheetBatch readSheetBatch(MultipartFile file, int offset, int limit) {
+        if (file == null || file.isEmpty()) throw new AgentException("请选择非空 Excel");
+        if (file.getSize() > MAX_FILE_BYTES) throw new AgentException("文档不能超过 8 MB，请拆分后导入");
+        if (offset < 0) throw new AgentException("导入位置不正确");
+        if (limit < 1 || limit > 5000) throw new AgentException("每批最多读取 5000 行");
+        String name = file.getOriginalFilename();
+        name = name == null ? "document" : name.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        String extension = name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        if (!"xlsx".equals(extension) && !"xls".equals(extension))
+            throw new AgentException("分批导入只支持 XLSX / XLS");
+        if (!parserSlot.tryAcquire()) throw new AgentException("另一个文档正在解析，请稍后再试");
+        try (InputStream input = file.getInputStream()) {
+            byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
+            if (bytes.length > MAX_FILE_BYTES) throw new AgentException("文档不能超过 8 MB，请拆分后导入");
+            if ("xlsx".equals(extension)) checkArchive(bytes);
+            try (org.apache.poi.ss.usermodel.Workbook book = "xls".equals(extension)
+                    ? new org.apache.poi.hssf.usermodel.HSSFWorkbook(new ByteArrayInputStream(bytes))
+                    : new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+                var formatter = new DataFormatter(Locale.ROOT);
+                formatter.setUseCachedValuesForFormulaCells(true);
+                int total = 0;
+                for (var sheet : book) for (var row : sheet)
+                    if (!sheetRowText(row, formatter).isBlank() && ++total > 200_000)
+                        throw new AgentException("Excel 超过 20 万行，请拆分后导入");
+                if (offset >= total)
+                    return new SheetBatch(name, "", offset, total, total, true);
+                Text text = new Text();
+                int seen = 0, added = 0;
+                for (var sheet : book) for (var row : sheet) {
+                    String line = sheetRowText(row, formatter);
+                    if (line.isBlank()) continue;
+                    if (seen++ < offset) continue;
+                    if (added >= limit) break;
+                    text.line(line);
+                    added++;
+                }
+                int next = offset + added;
+                return new SheetBatch(name, text.toString().trim(), offset, next, total, next >= total);
+            }
+        } catch (AgentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AgentException("Excel 无法读取，可能已损坏、加密或与扩展名不符。请另存为正常文档再试");
+        } finally {
+            parserSlot.release();
+        }
+    }
+
+    private static String sheetRowText(org.apache.poi.ss.usermodel.Row row,
+                                       DataFormatter formatter) {
+        var values = new java.util.ArrayList<String>();
+        for (var cell : row) {
+            String value = formatter.formatCellValue(cell);
+            if (value != null && !value.isBlank()) values.add(value);
+        }
+        return String.join("\t", values);
     }
 
     private static void readPdf(byte[] bytes, Text text) throws IOException {
@@ -124,8 +186,8 @@ public class VocabDocumentImporter {
             var formatter = new DataFormatter(Locale.ROOT);
             formatter.setUseCachedValuesForFormulaCells(true);
             for (var sheet : book) for (var row : sheet) {
-                for (var cell : row) { text.add(formatter.formatCellValue(cell)); text.add("\t"); }
-                text.add("\n");
+                String line = sheetRowText(row, formatter);
+                if (!line.isBlank()) text.line(line);
             }
         }
     }
@@ -194,7 +256,7 @@ public class VocabDocumentImporter {
         private final StringBuilder value = new StringBuilder();
         void add(String part) {
             if ((long)value.length() + part.length() > VocabService.MAX_ARTICLE_CHARS)
-                throw new AgentException("提取文字超过 100000 字符，请分段导入");
+                throw new AgentException("提取文字超过 " + VocabService.MAX_ARTICLE_CHARS + " 字符，请分段导入");
             value.append(part);
         }
         void line(String part) { add(part); add("\n"); }

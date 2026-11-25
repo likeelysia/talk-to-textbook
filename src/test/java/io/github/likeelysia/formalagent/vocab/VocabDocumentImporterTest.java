@@ -58,6 +58,35 @@ class VocabDocumentImporterTest {
             assertThat(read("words.xls", out.toByteArray())).contains("Excel vocabulary");
         }
     }
+    @Test void excelBatchesReadOnlyNonEmptyRowsWithProgress() throws Exception {
+        try (var doc = new XSSFWorkbook(); var out = new ByteArrayOutputStream()) {
+            var sheet = doc.createSheet("words");
+            for (int i = 0; i < 5; i++) sheet.createRow(i * 2).createCell(0).setCellValue("word" + i);
+            doc.write(out);
+            var file = new MockMultipartFile("file", "words.xlsx", "application/octet-stream", out.toByteArray());
+            var first = importer.readSheetBatch(file, 0, 2);
+            assertThat(first.totalRows()).isEqualTo(5);
+            assertThat(first.text()).isEqualTo("word0\nword1");
+            assertThat(first.nextOffset()).isEqualTo(2);
+            assertThat(first.done()).isFalse();
+            var last = importer.readSheetBatch(file, 4, 2);
+            assertThat(last.text()).isEqualTo("word4");
+            assertThat(last.done()).isTrue();
+            assertThat(importer.readSheetBatch(file, 9, 2).done()).isTrue();
+        }
+    }
+    @Test void sparseSheetsDoNotTurnEmptyCellsIntoText() throws Exception {
+        try (var doc = new XSSFWorkbook(); var out = new ByteArrayOutputStream()) {
+            var sheet = doc.createSheet("sparse");
+            sheet.createRow(0).createCell(0).setCellValue("bank");
+            sheet.createRow(1); // 空行
+            var row = sheet.createRow(2);
+            row.createCell(0).setCellValue("river");
+            row.createCell(4).setCellValue("water");
+            doc.write(out);
+            assertThat(read("sparse.xlsx", out.toByteArray())).isEqualTo("bank\nriver\twater");
+        }
+    }
     @Test void pdfReadsTextAndRejectsImageOnlyAndTooManyPages() throws Exception {
         try (var doc = new PDDocument(); var out = new ByteArrayOutputStream()) {
             var page = new PDPage(); doc.addPage(page);
@@ -85,7 +114,7 @@ class VocabDocumentImporterTest {
         assertThatThrownBy(() -> read("empty.txt", new byte[0])).hasMessageContaining("非空");
         assertThatThrownBy(() -> read("binary.txt", new byte[]{0,1,2})).hasMessageContaining("纯文本");
         assertThatThrownBy(() -> read("big.txt", new byte[VocabDocumentImporter.MAX_FILE_BYTES+1])).hasMessageContaining("8 MB");
-        assertThatThrownBy(() -> read("long.txt", "a".repeat(100001).getBytes())).hasMessageContaining("100000");
+        assertThatThrownBy(() -> read("long.txt", "a".repeat(200001).getBytes())).hasMessageContaining("200000");
         try (var out = new ByteArrayOutputStream()) {
             try (var zip = new ZipOutputStream(out)) {
                 zip.putNextEntry(new ZipEntry("large.xml"));

@@ -35,7 +35,7 @@ import org.springframework.stereotype.Service;
 public class VocabService {
 
     private static final Pattern WORD_PATTERN = Pattern.compile("[A-Za-z]+(?:['-][A-Za-z]+)*");
-    public static final int MAX_ARTICLE_CHARS = 100_000;
+    public static final int MAX_ARTICLE_CHARS = 200_000;
 
     private final VocabDictionary dictionary;
     private final int maxWords;
@@ -260,16 +260,22 @@ public class VocabService {
 
     public record Word(String w, String ph, String cn, String en, String tag, String pos,
                        List<String> forms, int count, List<String> examples, String lemma,
-                       String lookupWord, String lookupStatus, Explanation explanation) {
+                       String lookupWord, String lookupStatus, Explanation explanation,
+                       String customPos) {
         public Word {
             forms = forms == null ? List.of() : List.copyOf(forms);
             examples = examples == null ? List.of() : List.copyOf(examples);
         }
         public Word(String w, String ph, String cn, String en, String tag, String pos) {
-            this(w, ph, cn, en, tag, pos, List.of(w), 1, List.of(), "", w, "FOUND", null);
+            this(w, ph, cn, en, tag, pos, List.of(w), 1, List.of(), "", w, "FOUND", null, null);
+        }
+        public Word(String w, String ph, String cn, String en, String tag, String pos,
+                    List<String> forms, int count, List<String> examples, String lemma,
+                    String lookupWord, String lookupStatus, Explanation explanation) {
+            this(w, ph, cn, en, tag, pos, forms, count, examples, lemma, lookupWord, lookupStatus, explanation, null);
         }
         public Word withExplanation(Explanation value) {
-            return new Word(w, ph, cn, en, tag, pos, forms, count, examples, lemma, lookupWord, lookupStatus, value);
+            return new Word(w, ph, cn, en, tag, pos, forms, count, examples, lemma, lookupWord, lookupStatus, value, customPos);
         }
     }
 
@@ -284,7 +290,7 @@ public class VocabService {
     public static void validateWord(Word word) {
         if (word == null || word.w() == null || !WORD_PATTERN.matcher(word.w()).matches() || word.w().length() > 80)
             throw new AgentException("单词格式不正确");
-        for (String field : new String[]{word.cn(), word.en(), word.ph(), word.pos(), word.tag(), word.lemma(), word.lookupWord()}) {
+        for (String field : new String[]{word.cn(), word.en(), word.ph(), word.pos(), word.tag(), word.lemma(), word.lookupWord(), word.customPos()}) {
             if (field != null && field.length() > 12000) throw new AgentException("词条内容过长");
         }
         if (word.examples().size() > 3 || word.examples().stream().anyMatch(s -> s == null || s.length() > 400))

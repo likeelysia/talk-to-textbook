@@ -56,6 +56,9 @@ public class VocabController {
     }
     public record ExplainRequest(VocabService.Word word, String level, String example) { }
     public record SaveRequest(List<VocabService.Word> words) { }
+    public record QueueRequest(List<String> ids, Integer day) { }
+    public record PlanRequest(Integer days) { }
+    public record StarRequest(boolean starred) { }
     public record ReviewRequest(String rating) { }
 
     @PostMapping("/explain")
@@ -85,6 +88,37 @@ public class VocabController {
         return notebooks.of(owner(auth, expectedOwner)).saveBulk(request.words());
     }
 
+    /** 只有用户明确勾选并确认的词条才进入今日复习。 */
+    @PostMapping("/book/review-queue")
+    public VocabNotebook.Book queueForReview(Authentication auth,
+            @RequestHeader(value = "X-Vocab-Owner") String expectedOwner,
+            @RequestBody QueueRequest request) {
+        if (request == null) throw new AgentException("请选择要加入今日复习的词条");
+        return notebooks.of(owner(auth, expectedOwner)).queueForReview(request.ids(),
+                request.day() == null ? 0 : request.day());
+    }
+
+    @GetMapping("/review-plan")
+    public VocabNotebook.Plan reviewPlan(Authentication auth,
+            @RequestHeader(value = "X-Vocab-Owner", required = false) String expectedOwner) {
+        return notebooks.of(owner(auth, expectedOwner)).plan();
+    }
+
+    @PostMapping("/review-plan")
+    public VocabNotebook.Plan createReviewPlan(Authentication auth,
+            @RequestHeader(value = "X-Vocab-Owner") String expectedOwner,
+            @RequestBody PlanRequest request) {
+        if (request == null || request.days() == null) throw new AgentException("请填写计划天数");
+        return notebooks.of(owner(auth, expectedOwner)).createPlan(request.days());
+    }
+
+    @PostMapping("/book/{id}/star")
+    public VocabNotebook.Entry star(Authentication auth,
+            @RequestHeader(value = "X-Vocab-Owner") String expectedOwner,
+            @PathVariable String id, @RequestBody StarRequest request) {
+        return notebooks.of(owner(auth, expectedOwner)).setStarred(id,
+                request != null && request.starred());
+    }
 
     @PatchMapping("/book/{id}")
     public VocabNotebook.Entry update(Authentication auth,
@@ -115,6 +149,17 @@ public class VocabController {
             @org.springframework.web.bind.annotation.RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
         owner(auth, expectedOwner);
         return importer.read(file);
+    }
+
+    /** Excel 分批读取；前端每批调用 extract，避免整张表生成一个超大字符串。 */
+    @PostMapping(value = "/import/excel-batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public VocabDocumentImporter.SheetBatch importExcelBatch(Authentication auth,
+            @RequestHeader(value = "X-Vocab-Owner") String expectedOwner,
+            @org.springframework.web.bind.annotation.RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+            @org.springframework.web.bind.annotation.RequestParam(value = "offset", defaultValue = "0") int offset,
+            @org.springframework.web.bind.annotation.RequestParam(value = "limit", defaultValue = "1000") int limit) {
+        owner(auth, expectedOwner);
+        return importer.readSheetBatch(file, offset, limit);
     }
 
     /** 抽词 + 查词典，返回给页面渲染表格。 */
