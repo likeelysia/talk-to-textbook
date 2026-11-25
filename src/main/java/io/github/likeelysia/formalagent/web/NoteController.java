@@ -178,12 +178,13 @@ public class NoteController {
 
     /** 出口视图:一条笔记(问题 + 相关回答 + 出处线索)。 */
     public record NoteView(String id, String conversationId, String question, long questionAt,
-                           long savedAt, int answerCount, List<AnswerView> answers) {
+                           long savedAt, int answerCount, List<AnswerView> answers,
+                           List<String> images) {
 
         static NoteView of(Note note) {
             return new NoteView(note.id(), note.conversationId(), note.question(), note.questionAt(),
                     note.savedAt(), note.answers().size(),
-                    note.answers().stream().map(AnswerView::of).toList());
+                    note.answers().stream().map(AnswerView::of).toList(), note.images());
         }
     }
 

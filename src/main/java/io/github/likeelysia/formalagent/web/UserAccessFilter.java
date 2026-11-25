@@ -49,8 +49,19 @@ public class UserAccessFilter extends OncePerRequestFilter {
             return "POST".equals(m) && type != null
                     && "multipart/form-data".equalsIgnoreCase(type.split(";", 2)[0].trim());
         }
+        if (path.equals("/api/vocab/import/excel-batch")) {
+            String type = r.getContentType();
+            return "POST".equals(m) && type != null
+                    && "multipart/form-data".equalsIgnoreCase(type.split(";", 2)[0].trim());
+        }
         if (path.equals("/api/vocab/book/bulk")) {
             return "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.equals("/api/vocab/book/review-queue")) {
+            return "POST".equals(m) && isJson(r.getContentType());
+        }
+        if (path.equals("/api/vocab/review-plan")) {
+            return "GET".equals(m) || "POST".equals(m) && isJson(r.getContentType());
         }
         if (path.equals("/api/vocab/book")) {
             return "GET".equals(m) || "POST".equals(m) && isJson(r.getContentType());
@@ -59,9 +70,13 @@ public class UserAccessFilter extends OncePerRequestFilter {
                 || path.equals("/api/vocab/docx") || path.matches("/api/vocab/book/[A-Za-z0-9-]{1,40}/review")) {
             return "POST".equals(m) && isJson(r.getContentType());
         }
+        if (path.matches("/api/vocab/book/[A-Za-z0-9-]{1,40}/star")) {
+            return "POST".equals(m) && isJson(r.getContentType());
+        }
         if (path.matches("/api/vocab/book/[A-Za-z0-9-]{1,40}")) {
             return "DELETE".equals(m) || "PATCH".equals(m) && isJson(r.getContentType());
         }
+        if (path.startsWith("/api/images/")) return "GET".equals(m);
         if (path.equals("/api/conversations")) return "GET".equals(m) || "POST".equals(m);
         if (path.matches("/api/conversations/[A-Za-z0-9_-]{1,40}")) {
             return "GET".equals(m) || "PATCH".equals(m) || "DELETE".equals(m);

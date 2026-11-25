@@ -90,7 +90,12 @@ public class AssistantService {
      * @param displayQuestion 存进历史的那句话(图片链路上是"用户原话 / 几张图")
      */
     public Turn ask(String conversationId, String modelQuestion, String displayQuestion) {
-        return ask(conversationId, modelQuestion, displayQuestion, null, false);
+        return ask(conversationId, modelQuestion, displayQuestion, null, false, null);
+    }
+
+    /** 图片提问：额外把图片 URL 记进用户消息，刷新后仍能查看。 */
+    public Turn ask(String conversationId, String modelQuestion, String displayQuestion, List<String> images) {
+        return ask(conversationId, modelQuestion, displayQuestion, null, false, images);
     }
 
     /**
@@ -101,19 +106,20 @@ public class AssistantService {
      * 不能因为"答案已经边吐边显示了"就漏掉写历史。
      */
     public Turn askStream(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink) {
-        return ask(conversationId, modelQuestion, displayQuestion, sink, false);
+        return ask(conversationId, modelQuestion, displayQuestion, sink, false, null);
     }
 
     public Turn ask(String conversationId, String question, boolean webSearch) {
-        return ask(conversationId, question, question, null, webSearch);
+        return ask(conversationId, question, question, null, webSearch, null);
     }
 
     public Turn askStream(String conversationId, String question, StreamSink sink, boolean webSearch) {
-        return ask(conversationId, question, question, sink, webSearch);
+        return ask(conversationId, question, question, sink, webSearch, null);
     }
 
     /** 一轮问答的真正实现;sink 为 null = 非流式。 */
-    private Turn ask(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink, boolean webSearch) {
+    private Turn ask(String conversationId, String modelQuestion, String displayQuestion, StreamSink sink,
+                     boolean webSearch, List<String> images) {
         String id = conversations.requireExisting(conversationId);
         Conversation conversation = conversations.get(id);
 
@@ -145,7 +151,7 @@ public class AssistantService {
                 : (sink == null)
                 ? agent.run(modelQuestion, history)
                 : agent.runStream(modelQuestion, history, sink);
-        Conversation recorded = conversations.record(id, displayQuestion, result.answer(), result.trace());
+        Conversation recorded = conversations.record(id, displayQuestion, result.answer(), result.trace(), images);
         longTerm.maybeExtract(recorded);          // 攒够几轮就在后台提炼一次(不占用户等答案的时间)
         return new Turn(result, id);
     }

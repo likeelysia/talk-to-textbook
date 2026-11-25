@@ -54,9 +54,9 @@ class UserImageAccessTest {
         when(aChat.requireExisting("alice-chat")).thenReturn("alice-chat");
         when(bChat.requireExisting("alice-chat")).thenThrow(new AgentException("会话不存在"));
         var vision = mock(VisionClient.class); var storage = mock(FileStorage.class);
-        when(storage.store(anyString(),any())).thenReturn(Path.of("private-image.jpg"));
+        when(storage.store(eq("uAlice"), anyString(), any())).thenReturn(Path.of("private-image.jpg"));
         when(vision.ask(any(),anyString())).thenReturn("A triangle with three sides.");
-        when(aAssistant.ask(eq("alice-chat"),anyString(),anyString()))
+        when(aAssistant.ask(eq("alice-chat"),anyString(),anyString(),anyList()))
                 .thenReturn(new AssistantService.Turn(new AgentResult("三角形",List.of(),1),"alice-chat"));
         var controller = new AgentController(mock(AssistantService.class),vision,storage,
                 mock(ConversationService.class),users,current);
@@ -71,7 +71,7 @@ class UserImageAccessTest {
             SecurityContextHolder.getContext().setAuthentication(alice);
             mvc.perform(multipart("/api/agent").file(file).param("conversationId","alice-chat").principal(alice))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.answer").value("三角形"));
-            verify(aAssistant).ask(eq("alice-chat"),contains("A triangle"),anyString());
+            verify(aAssistant).ask(eq("alice-chat"),contains("A triangle"),anyString(),anyList());
             verifyNoInteractions(bAssistant);
         } finally { SecurityContextHolder.clearContext(); }
     }

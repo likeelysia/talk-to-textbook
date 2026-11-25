@@ -47,19 +47,41 @@ public class FileStorage {
 
     /** 落盘;返回服务端的真实路径。 */
     public Path store(String originalName, InputStream content) {
+        return store(null, originalName, content);
+    }
+
+    /** 按用户隔离落盘；owner 为空时保持旧的全局目录行为。 */
+    public Path store(String owner, String originalName, InputStream content) {
         String safe = sanitize(originalName);
-        Path target = baseDir.resolve(safe).normalize();
-        if (!target.startsWith(baseDir)) {                       // 双保险:规范化后必须还在目录内
-            throw new AgentException("非法文件名:" + originalName);
-        }
+        Path dir = owner == null || owner.isBlank() ? baseDir : baseDir.resolve(safeOwner(owner)).normalize();
+        if (!dir.startsWith(baseDir)) throw new AgentException("非法用户目录");
+        Path target = dir.resolve(safe).normalize();
+        if (!target.startsWith(dir)) throw new AgentException("非法文件名:" + originalName);
         try {
-            Files.createDirectories(baseDir);
+            Files.createDirectories(dir);
             long bytes = Files.copy(content, target, StandardCopyOption.REPLACE_EXISTING);
             log.info("上传文件已落盘:{} ({} 字节)", target, bytes);
             return target;
         } catch (IOException e) {
             throw new AgentException("保存上传文件失败:" + e.getMessage(), e);
         }
+    }
+
+    public Path resolve(String owner, String name) {
+        if (owner == null || owner.isBlank() || name == null || name.isBlank()
+                || name.contains("/") || name.contains("\\") || name.contains("..")) {
+            throw new AgentException("图片路径不正确");
+        }
+        Path dir = baseDir.resolve(safeOwner(owner)).normalize();
+        Path target = dir.resolve(name).normalize();
+        if (!target.startsWith(dir) || !Files.isRegularFile(target)) throw new AgentException("图片不存在");
+        return target;
+    }
+
+    private static String safeOwner(String owner) {
+        String safe = owner.replaceAll("[^A-Za-z0-9_-]", "_");
+        if (safe.isBlank()) throw new AgentException("非法用户目录");
+        return safe;
     }
 
     /**

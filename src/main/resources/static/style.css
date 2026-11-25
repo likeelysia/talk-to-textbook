@@ -521,3 +521,8 @@ button.danger:hover { background: #b93b36; }
 .home-brand { color: inherit; text-decoration: none; }
 .home-brand:hover { color: var(--brand); }
 .home-brand:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; }
+
+.mobile-memory{display:none}@media(max-width:860px){.mobile-memory{display:inline-flex;margin-left:auto}}
+.bubble .thumbs button.thumb{border:0;padding:0;background:transparent;cursor:pointer}
+
+@media(max-width:860px){.modal{display:block;overflow-y:auto;padding:10px}.modal-box{max-height:none;min-height:calc(100vh - 20px)}.mem-list{flex:none;min-height:160px;max-height:45vh}.mem-core textarea{min-height:72px}}

@@ -10,17 +10,25 @@ import io.github.likeelysia.formalagent.service.FileStorage;
 import io.github.likeelysia.formalagent.service.UserScopeFactory;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.Authentication;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.UriUtils;
 
 /**
  * Agent 问答接口:POST /api/agent
@@ -118,6 +126,19 @@ public class AgentController {
         return response(assistant.ask(req.conversationId(), req.question(), true));
     }
 
+    /** 已发送图片：只允许本人访问；文件名不可猜测，仍做归属校验。 */
+    @GetMapping("/images/{owner}/{name:.+}")
+    public ResponseEntity<Resource> image(Authentication auth,
+                                          @PathVariable String owner,
+                                          @PathVariable String name) {
+        if (currentUser == null || !currentUser.id(auth).equals(owner))
+            throw new AgentException("图片不存在");
+        Path path = fileStorage.resolve(owner, name);
+        MediaType type = MediaTypeFactory.getMediaType(path.getFileName().toString())
+                .orElse(MediaType.APPLICATION_OCTET_STREAM);
+        return ResponseEntity.ok().contentType(type).body(new FileSystemResource(path));
+    }
+
     /**
      * 图片提问:上传 1~{@value #MAX_IMAGES} 张图片 →(逐张视觉识别)→ 合并成一段文字 → 交给 Agent 回答。
      *
@@ -130,16 +151,18 @@ public class AgentController {
                                         @RequestParam("files") List<MultipartFile> files,
                                         @RequestParam(value = "question", required = false) String question,
                                         @RequestParam(value = "conversationId", required = false) String conversationId) {
-        return image(assistant(auth), conversations(auth), files, question, conversationId);
+        return image(assistant(auth), conversations(auth), files, question, conversationId,
+                currentUser == null ? null : currentUser.id(auth));
     }
 
     public AgentResponse agentWithImage(List<MultipartFile> files, String question,
                                         String conversationId) {
-        return image(assistant, conversations, files, question, conversationId);
+        return image(assistant, conversations, files, question, conversationId, null);
     }
 
     private AgentResponse image(AssistantService assistant, ConversationService conversations,
-                                List<MultipartFile> files, String question, String conversationId) {
+                                List<MultipartFile> files, String question, String conversationId,
+                                String owner) {
         if (files == null || files.stream().allMatch(MultipartFile::isEmpty)) {
             throw new AgentException("files 不能为空");
         }
@@ -149,8 +172,9 @@ public class AgentController {
         // 会话 id 先验掉:识别 10 张图要花两分钟,别等跑完才发现要记到一个不存在的会话里
         String id = conversations.requireExisting(conversationId);
 
-        // 逐张识别,失败的只记一笔、不中断整批
+        // 逐张识别,失败的只记一笔、不中断整批；图片先落盘，识别失败也可回看
         StringBuilder imagesText = new StringBuilder();
+        List<String> imageUrls = new ArrayList<>();
         int recognized = 0;
         for (int i = 0; i < files.size(); i++) {
             MultipartFile file = files.get(i);
@@ -160,7 +184,13 @@ public class AgentController {
                 continue;
             }
             try {
-                Path stored = fileStorage.store(file.getOriginalFilename(), file.getInputStream());
+                Path stored = fileStorage.store(owner, file.getOriginalFilename(), file.getInputStream());
+                if (owner != null) {
+                    String encodedOwner = UriUtils.encodePathSegment(owner, java.nio.charset.StandardCharsets.UTF_8);
+                    String encodedName = UriUtils.encodePathSegment(stored.getFileName().toString(),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    imageUrls.add("/api/images/" + encodedOwner + "/" + encodedName);
+                }
                 String described = vision.ask(stored, Prompts.get("image-question"));
                 imagesText.append(label).append('\n').append(described).append('\n');
                 recognized++;
@@ -183,18 +213,20 @@ public class AgentController {
                 : "请根据下面这些图片的内容回答:\n" + imagesText;
         // 存进历史的用「用户原本那句话 / 几张图」,而不是拼给模型的那一大段 OCR 文本
         String display = hasQuestion ? question : "(" + files.size() + " 张图片)";
-        return ask(assistant, id, finalQuestion.trim(), display);
+        return ask(assistant, id, finalQuestion.trim(), display, imageUrls);
     }
 
     /** 文本提问入口:模型看到的问题 = 存进历史的问题。 */
     private AgentResponse ask(AssistantService assistant, String conversationId, String question) {
-        return ask(assistant, conversationId, question, question);
+        return ask(assistant, conversationId, question, question, null);
     }
 
-    /** 跑一轮(记忆 + Agent + 落库)→ 组装响应。 */
     private AgentResponse ask(AssistantService assistant, String conversationId,
-                              String modelQuestion, String displayQuestion) {
-        return response(assistant.ask(conversationId, modelQuestion, displayQuestion));
+                              String modelQuestion, String displayQuestion, List<String> images) {
+        AssistantService.Turn turn = images == null || images.isEmpty()
+                ? assistant.ask(conversationId, modelQuestion, displayQuestion)
+                : assistant.ask(conversationId, modelQuestion, displayQuestion, images);
+        return response(turn);
     }
 
     private AgentResponse response(AssistantService.Turn turn) {

@@ -103,9 +103,14 @@ public class ConversationService {
      * @param trace          Agent 这一轮调过的工具(可为 null)
      */
     public Conversation record(String conversationId, String question, String answer, List<String> trace) {
+        return record(conversationId, question, answer, trace, null);
+    }
+
+    public Conversation record(String conversationId, String question, String answer, List<String> trace,
+                               List<String> images) {
         String id = resolve(conversationId);
         return store.update(id, conversation -> conversation
-                .appended(ChatMessage.user(question))
+                .appended(ChatMessage.user(question, images))
                 .appended(ChatMessage.assistant(answer, trace))
                 .autoTitled());
     }

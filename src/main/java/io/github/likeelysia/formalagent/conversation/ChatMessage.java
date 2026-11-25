@@ -21,19 +21,30 @@ import java.util.List;
  * {@code "user":true},回读时它又是个"未知字段",直接反序列化失败。
  * 想写 {@code isXxx()} 又要躲开,就得挂 {@code @JsonIgnore};但更省事的做法是别用那个前缀。
  */
-public record ChatMessage(String role, String content, long createdAt, List<String> trace) {
+public record ChatMessage(String role, String content, long createdAt, List<String> trace,
+                          List<String> images) {
+
+    /** 兼容旧调用与旧 JSON：没有图片的普通消息。 */
+    public ChatMessage(String role, String content, long createdAt, List<String> trace) {
+        this(role, content, createdAt, trace, null);
+    }
 
     /** 紧凑构造器:把 null 归一化,别让下游到处判空。 */
     public ChatMessage {
         trace = (trace == null || trace.isEmpty()) ? null : List.copyOf(trace);
+        images = (images == null || images.isEmpty()) ? null : List.copyOf(images);
     }
 
     public static ChatMessage user(String content) {
-        return new ChatMessage("user", content, System.currentTimeMillis(), null);
+        return new ChatMessage("user", content, System.currentTimeMillis(), null, null);
+    }
+
+    public static ChatMessage user(String content, List<String> images) {
+        return new ChatMessage("user", content, System.currentTimeMillis(), null, images);
     }
 
     public static ChatMessage assistant(String content, List<String> trace) {
-        return new ChatMessage("assistant", content, System.currentTimeMillis(), trace);
+        return new ChatMessage("assistant", content, System.currentTimeMillis(), trace, null);
     }
 
     /** 是用户发的?(⚠️ 不能叫 isUser —— 见类注释的命名陷阱) */

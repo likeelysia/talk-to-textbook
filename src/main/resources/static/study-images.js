@@ -11,9 +11,10 @@
         dialog.classList.remove('original-size'); zoom.textContent = '查看原尺寸';
     }
     window.openStudyImage = (url, filename) => {
-        if (!String(url).startsWith('blob:')) return;
+        const src = String(url || '');
+        if (!src.startsWith('blob:') && !src.startsWith('/api/images/')) return;
         previousFocus = document.activeElement;
-        reset(); image.src = url; image.alt = filename; name.textContent = filename;
+        reset(); image.src = src; image.alt = filename; name.textContent = filename;
         if (typeof dialog.showModal === 'function') dialog.showModal();
         else dialog.setAttribute('open', '');
         close.focus();

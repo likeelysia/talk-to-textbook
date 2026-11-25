@@ -35,7 +35,7 @@
 
     <!-- ==================== 对话区 ==================== -->
     <section class="card chat" aria-label="学习对话">
-        <div class="desk-heading"><div><h2>从一个问题开始</h2><p>读懂教材，也记住每一次思考。</p></div><span>ROOM FOR CURIOSITY</span></div>
+        <div class="desk-heading"><div><h2>从一个问题开始</h2><p>读懂教材，也记住每一次思考。</p></div><button id="openMemoryTop" type="button" class="mini mobile-memory">记忆</button><span>ROOM FOR CURIOSITY</span></div>
         <div id="messages" class="messages">
             <div class="bubble bot">
                 你好!我是教材问答助手。直接提问,或者上传题目图片(一次最多 10 张)—— 我会自己去知识库里查资料,再回答你。每个对话各自独立记忆,想另起一个话题就点左上角「＋ 新建」。
@@ -92,6 +92,7 @@
         <p class="mem-tip muted small">
             助手会在后台把值得记的事攒起来。这里能看见、能改、能删 —— 标为「已固定」的不会被自动清理(满了先淘汰最久没用到的那条)。
         </p>
+        <p id="memSummary" class="muted small" role="status"></p>
         <div class="mem-core">
             <div class="mem-core-head">
                 <strong><svg class="desk-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="/study-icons.svg?v=20261024#pin"></use></svg><span>核心档案</span></strong>

@@ -134,7 +134,8 @@ public class NoteService {
                 continue;
             }
             Note note = new Note(newId(), conversationId, question, message.createdAt(),
-                    pickAnswers(question, messages, index, assistantIndexes, assistantVectors), now);
+                    pickAnswers(question, messages, index, assistantIndexes, assistantVectors), now,
+                    message.images());
             if (!existing.add(note.dedupKey())) {
                 duplicate++;
                 continue;

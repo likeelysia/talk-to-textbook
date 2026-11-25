@@ -735,7 +735,7 @@ async function switchConversation(id) {
 
 function renderStoredMessage(m, index) {
     if (m.role === 'user') {
-        addUserBubble(m.content, index);          // 存笔记模式下会带上勾选框
+        addUserBubble(m.content, index, m.images);          // 存笔记模式下会带上勾选框
     } else if (m.role === 'assistant') {
         const trace = m.trace || [];
         addBubble('bot', renderAnswer({ answer: m.content, trace, steps: trace.length }));
@@ -1187,6 +1187,7 @@ const closeMemoryBtn = document.getElementById('closeMemory');
 const memTextEl = document.getElementById('memText');
 const memAddBtn = document.getElementById('memAdd');
 const memListEl = document.getElementById('memList');
+const memSummaryEl = document.getElementById('memSummary');
 const memExportBtn = document.getElementById('memExport');
 const memForgetBtn = document.getElementById('memForgetAll');
 const memScopeEl = document.getElementById('memScope');
@@ -1369,6 +1370,9 @@ async function loadMemories() {
         const data = await apiJson('/api/memory?' + memQuery());
         renderMemories(data.memories || []);
         document.getElementById('memoryLabel').textContent = `记忆（${data.count || 0}）`;
+        if (memSummaryEl) memSummaryEl.textContent = data.count
+            ? `当前对话已保存 ${data.count} 条记忆`
+            : '当前对话还没有保存的记忆；记忆按对话独立，切换对话后再看。';
     } catch (e) {
         if (e instanceof IdentityChangedError) return;
         memListEl.textContent = '读不出来:' + e.message;
@@ -1511,6 +1515,7 @@ function closeMemory() {
 }
 
 openMemoryBtn.addEventListener('click', openMemory);
+document.getElementById('openMemoryTop')?.addEventListener('click', openMemory);
 // 深链接:/#memory 直接打开记忆抽屉(方便截图/收藏)
 if (location.hash === '#memory') {
     setTimeout(openMemory, 300);
@@ -1562,7 +1567,7 @@ const noteDetailEl = document.getElementById('noteDetail');
 let currentNoteId = null;
 
 /** 带「可勾选」能力的用户气泡:勾选模式下旁边多一个勾选框。 */
-function addUserBubble(text, index) {
+function addUserBubble(text, index, images) {
     const div = document.createElement('div');
     div.className = 'bubble user';
     if (noteSelectMode && typeof index === 'number') {
@@ -1578,6 +1583,23 @@ function addUserBubble(text, index) {
             renderNoteButton();
         });
         div.appendChild(box);
+    }
+    if (images && images.length) {
+        const strip = document.createElement('div');
+        strip.className = 'thumbs';
+        images.forEach((src, i) => {
+            if (!String(src).startsWith('/api/images/')) return;
+            const thumb = document.createElement('button');
+            thumb.type = 'button';
+            thumb.className = 'thumb';
+            thumb.title = '查看已发送图片';
+            const img = document.createElement('img');
+            img.src = src; img.alt = `已发送图片 ${i + 1}`;
+            thumb.appendChild(img);
+            thumb.addEventListener('click', () => window.openStudyImage?.(src, `已发送图片 ${i + 1}`));
+            strip.appendChild(thumb);
+        });
+        div.appendChild(strip);
     }
     const body = document.createElement('div');
     body.className = 'bubble-body';
@@ -1706,6 +1728,11 @@ async function openNote(id) {
     currentNoteId = id;
     try {
         const n = await apiJson('/api/notes/' + encodeURIComponent(id));
+        const images = (n.images || []).filter(src => String(src).startsWith('/api/images/'));
+        const imageHtml = images.length
+            ? `<div class="thumbs">${images.map((src, i) =>
+                `<button type="button" class="thumb" data-note-image="${escapeHtml(src)}" title="查看图片"><img src="${escapeHtml(src)}" alt="笔记图片 ${i + 1}"></button>`).join('')}</div>`
+            : '';
         const answers = (n.answers || []).map(a =>
             '<div class="note-answer">'
             + renderAnswer({ answer: a.text, trace: a.trace, steps: (a.trace || []).length })
@@ -1713,7 +1740,11 @@ async function openNote(id) {
         noteDetailEl.innerHTML =
             `<h3 class="note-q-h">${escapeHtml(n.question)}</h3>`
             + `<p class="muted small">存于 ${formatTime(n.savedAt)}</p>`
+            + imageHtml
             + (answers || '<p class="muted small">这条问题当时还没有回答。</p>');
+        noteDetailEl.querySelectorAll('[data-note-image]').forEach(button => {
+            button.addEventListener('click', () => window.openStudyImage?.(button.dataset.noteImage, '笔记图片'));
+        });
     } catch (e) {
         if (e instanceof IdentityChangedError) return;
         noteDetailEl.innerHTML = '<p class="muted small">读不出来:' + escapeHtml(e.message) + '</p>';

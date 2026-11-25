@@ -16,10 +16,17 @@ import java.util.List;
  * @param savedAt        存进笔记本的时间
  */
 public record Note(String id, String conversationId, String question, long questionAt,
-                   List<Answer> answers, long savedAt) {
+                   List<Answer> answers, long savedAt, List<String> images) {
 
     public Note {
         answers = answers == null ? List.of() : List.copyOf(answers);
+        images = (images == null || images.isEmpty()) ? null : List.copyOf(images);
+    }
+
+    /** 兼容旧调用：没有图片的笔记。 */
+    public Note(String id, String conversationId, String question, long questionAt,
+                List<Answer> answers, long savedAt) {
+        this(id, conversationId, question, questionAt, answers, savedAt, null);
     }
 
     /** 手工笔记没有来源会话；旧调用方仍可传会话 id。 */
