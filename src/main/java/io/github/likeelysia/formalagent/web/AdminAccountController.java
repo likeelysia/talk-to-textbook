@@ -3,9 +3,11 @@ package io.github.likeelysia.formalagent.web;
 import io.github.likeelysia.formalagent.account.Account;
 import io.github.likeelysia.formalagent.account.AccountService;
 import io.github.likeelysia.formalagent.exception.AgentException;
+import io.github.likeelysia.formalagent.usage.UsageService;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +26,9 @@ public class AdminAccountController {
     private final AccountService accounts;
     private final CurrentUser currentUser;
 
+    @Autowired(required = false)
+    private UsageService usage;
+
     public AdminAccountController(AccountService accounts, CurrentUser currentUser) {
         this.accounts = accounts;
         this.currentUser = currentUser;
@@ -36,6 +41,35 @@ public class AdminAccountController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("count", views.size());
         body.put("accounts", views);
+        return body;
+    }
+
+    @GetMapping("/usage")
+    public Map<String, Object> usage(Authentication auth) {
+        requireAdmin(auth);
+        Map<String, Object> users = new LinkedHashMap<>();
+        if (usage != null) {
+            accounts.list().forEach(a -> users.put(a.userId(), usage.view(a.userId())));
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("users", users);
+        body.put("globalMonthRequests", usage == null ? 0 : usage.view("").get("globalMonthRequests"));
+        body.put("globalMonthlyRequests", usage == null ? 0 : usage.view("").get("globalMonthlyRequests"));
+        return body;
+    }
+
+    @PostMapping("/{id}/quota")
+    public Map<String, Object> setQuota(Authentication auth, @PathVariable String id,
+                                        @RequestBody(required = false) QuotaRequest req) {
+        requireAdmin(auth);
+        if (usage == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "用量服务未启用");
+        if (req == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请求不能为空");
+        accounts.requireById(id);
+        usage.setQuota(id, req.dailyRequests() == null ? 0 : req.dailyRequests(),
+                req.monthlyRequests() == null ? 0 : req.monthlyRequests());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("userId", id);
+        body.put("usage", usage.view(id));
         return body;
     }
 
@@ -88,6 +122,9 @@ public class AdminAccountController {
     }
 
     public record ResetRequest(String password) {
+    }
+
+    public record QuotaRequest(Integer dailyRequests, Integer monthlyRequests) {
     }
 
     public record AccountView(String userId, String username, boolean enabled, String role,

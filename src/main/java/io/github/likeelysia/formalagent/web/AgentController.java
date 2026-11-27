@@ -8,12 +8,14 @@ import io.github.likeelysia.formalagent.prompt.Prompts;
 import io.github.likeelysia.formalagent.service.AssistantService;
 import io.github.likeelysia.formalagent.service.FileStorage;
 import io.github.likeelysia.formalagent.service.UserScopeFactory;
+import io.github.likeelysia.formalagent.usage.UsageService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
@@ -66,6 +68,10 @@ public class AgentController {
     private final UserScopeFactory users;
     private final CurrentUser currentUser;
 
+    /** 用量服务在单测里可能没有；没有就跳过配额，不影响旧调用。 */
+    @Autowired(required = false)
+    private UsageService usage;
+
     public AgentController(AssistantService assistant, VisionClient vision, FileStorage fileStorage,
                            ConversationService conversations) {
         this(assistant, vision, fileStorage, conversations, null, null);
@@ -112,10 +118,18 @@ public class AgentController {
         if (req == null || req.question() == null || req.question().isBlank()) {
             throw new AgentException("question 不能为空");
         }
-        AssistantService scoped = assistant(auth);
-        if (!req.webSearch()) return ask(scoped, req.conversationId(), req.question());
-        AssistantService.Turn turn = scoped.ask(req.conversationId(), req.question(), true);
-        return response(turn);
+        String owner = owner(auth);
+        checkQuota(auth, owner, 1);
+        AgentResponse response = null;
+        try {
+            AssistantService scoped = assistant(auth);
+            response = !req.webSearch()
+                    ? ask(scoped, req.conversationId(), req.question())
+                    : response(scoped.ask(req.conversationId(), req.question(), true));
+            return response;
+        } finally {
+            recordUsage(owner, 1, req.question(), response == null ? null : response.answer());
+        }
     }
 
     public AgentResponse agent(AgentRequest req) {
@@ -151,8 +165,16 @@ public class AgentController {
                                         @RequestParam("files") List<MultipartFile> files,
                                         @RequestParam(value = "question", required = false) String question,
                                         @RequestParam(value = "conversationId", required = false) String conversationId) {
-        return image(assistant(auth), conversations(auth), files, question, conversationId,
-                currentUser == null ? null : currentUser.id(auth));
+        String owner = owner(auth);
+        int units = 1 + (files == null ? 0 : files.size());
+        checkQuota(auth, owner, units);
+        AgentResponse response = null;
+        try {
+            response = image(assistant(auth), conversations(auth), files, question, conversationId, owner);
+            return response;
+        } finally {
+            recordUsage(owner, units, question, response == null ? null : response.answer());
+        }
     }
 
     public AgentResponse agentWithImage(List<MultipartFile> files, String question,
@@ -227,6 +249,24 @@ public class AgentController {
                 ? assistant.ask(conversationId, modelQuestion, displayQuestion)
                 : assistant.ask(conversationId, modelQuestion, displayQuestion, images);
         return response(turn);
+    }
+
+    private String owner(Authentication auth) {
+        return currentUser == null ? null : currentUser.id(auth);
+    }
+
+    private void checkQuota(Authentication auth, String owner, int units) {
+        if (usage == null || owner == null) return;
+        usage.check(owner, currentUser.admin(auth), units);
+    }
+
+    private void recordUsage(String owner, int units, String question, String answer) {
+        if (usage == null || owner == null) return;
+        try {
+            usage.record(owner, units, question, answer);
+        } catch (RuntimeException e) {
+            log.warn("用量记账失败 owner={}: {}", owner, e.getMessage());
+        }
     }
 
     private AgentResponse response(AssistantService.Turn turn) {

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>账号与用量 · 灯下</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/study.html">灯下</a>
+  <span>管理后台</span>
+  <a class="back" href="/study.html">返回学习</a>
+</header>
+<main>
+  <section id="denied" class="card" hidden>
+    <h1>需要管理员权限</h1>
+    <p>当前账号不是管理员。请用管理员账号登录后再打开这个页面。</p>
+    <a href="/login.html">去登录</a>
+  </section>
+
+  <div id="panel" hidden>
+    <section class="card">
+      <div class="section-head">
+        <div><h1>账号</h1><p class="muted">邀请制；朋友使用独立账号，数据互不可见。</p></div>
+        <button id="refresh" type="button">刷新</button>
+      </div>
+      <div class="create">
+        <input id="newUsername" placeholder="用户名（3–32 位）" autocomplete="off">
+        <input id="newPassword" type="password" placeholder="初始密码（至少 8 位）" autocomplete="new-password">
+        <select id="newRole"><option value="USER">普通用户</option><option value="ADMIN">管理员</option></select>
+        <button id="createAccount" type="button" class="primary">创建账号</button>
+      </div>
+      <p id="createMsg" class="msg" role="status"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>账号</th><th>角色</th><th>状态</th><th>今日</th><th>本月</th><th>额度（日/月）</th><th>操作</th></tr></thead>
+          <tbody id="accounts"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>全站本月</h2><p class="muted">所有账号的 AI 调用次数；额度到上限后普通用户会被拒绝。</p></div></div>
+      <p id="global" class="global"></p>
+    </section>
+  </div>
+</main>
+<script src="/admin.js" defer></script>
+</body>
+</html>

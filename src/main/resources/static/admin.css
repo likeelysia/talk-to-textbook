@@ -1,0 +1,28 @@
+:root{--bg:#f4f6f8;--card:#fff;--line:#dfe5ea;--text:#17221d;--muted:#6c7a73;--brand:#3b6b4f;--danger:#a33a33}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.top{display:flex;align-items:center;gap:14px;padding:12px 20px;background:#fff;border-bottom:1px solid var(--line)}
+.brand{font-weight:700;color:var(--text);text-decoration:none;font-size:18px}
+.back{margin-left:auto;color:var(--brand);text-decoration:none}
+main{max-width:1120px;margin:20px auto;padding:0 14px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+h1,h2{margin:0;font-size:20px}h2{font-size:17px}p{margin:4px 0}
+.muted{color:var(--muted)}.msg{min-height:20px;color:var(--danger)}
+.create{display:flex;gap:8px;flex-wrap:wrap}
+input,select,button{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--text)}
+input{min-width:180px}
+button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+button.danger{color:var(--danger);border-color:#e3b5b1}
+.table-wrap{overflow:auto}
+table{width:100%;border-collapse:collapse;min-width:780px}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600}
+td .small{display:block;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;background:#eef4f0;color:#315b43}
+.badge.off{background:#f7e9e7;color:#8d3b34}
+.global{font-size:22px;font-weight:700}
+.empty{padding:20px;text-align:center;color:var(--muted)}
+@media(max-width:640px){.top{padding:10px 12px}main{margin:12px auto}.card{padding:12px}input{min-width:0;flex:1 1 160px}}

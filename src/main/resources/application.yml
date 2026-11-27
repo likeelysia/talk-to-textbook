@@ -47,6 +47,19 @@ server:
 fa:
   debug: false
 
+  # ---- 账号用量与邀请制额度 ----
+  usage:
+    file: ${FA_USAGE_FILE:data/usage/usage.json}
+  billing:
+    # 新账号默认额度；0 = 不限。管理员可在 /admin.html 单独覆盖。
+    default-daily-requests: ${FA_BILLING_DAILY:60}
+    default-monthly-requests: ${FA_BILLING_MONTHLY:600}
+    # 全站普通用户每月调用总上限，防止所有账号一起把预算跑穿。
+    global-monthly-requests: ${FA_BILLING_GLOBAL_MONTHLY:5000}
+    # 可选：把估算成本也显示出来；单位“分/百万 token”，默认 0 = 只统计次数。
+    input-cents-per-million: ${FA_BILLING_INPUT_CENTS_PER_MILLION:0}
+    output-cents-per-million: ${FA_BILLING_OUTPUT_CENTS_PER_MILLION:0}
+
   # ---- 单用户登录(Spring Security)----
   # username: 登录名
   # password-hash: BCrypt 哈希(推荐,部署用)

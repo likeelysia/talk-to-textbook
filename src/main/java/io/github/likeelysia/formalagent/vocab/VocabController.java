@@ -7,6 +7,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.server.ResponseStatusException;
 import io.github.likeelysia.formalagent.web.CurrentUser;
+import io.github.likeelysia.formalagent.usage.UsageService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,6 +42,9 @@ public class VocabController {
     private final CurrentUser currentUser;
     private final VocabDocumentImporter importer;
 
+    @Autowired(required = false)
+    private UsageService usage;
+
     public VocabController(VocabService service, VocabExplanationService explanations,
                            UserVocabNotebooks notebooks, CurrentUser currentUser, VocabDocumentImporter importer) {
         this.service = service;
@@ -65,7 +70,22 @@ public class VocabController {
     public VocabService.Explanation explain(Authentication auth,
             @RequestHeader(value = "X-Vocab-Owner") String expectedOwner,
             @RequestBody ExplainRequest request) {
-        return explanations.explain(owner(auth, expectedOwner), request.word(), request.level(), request.example());
+        String owner = owner(auth, expectedOwner);
+        if (usage != null) usage.check(owner, currentUser.admin(auth), 1);
+        VocabService.Explanation explanation = null;
+        try {
+            explanation = explanations.explain(owner, request.word(), request.level(), request.example());
+            return explanation;
+        } finally {
+            if (usage != null) {
+                try {
+                    usage.record(owner, 1, request.word() == null ? null : request.word().w(),
+                            explanation == null ? null : explanation.cn() + " " + explanation.en());
+                } catch (RuntimeException ignored) {
+                    // 记账失败不阻断用户拿到解释
+                }
+            }
+        }
     }
 
     @GetMapping("/book")

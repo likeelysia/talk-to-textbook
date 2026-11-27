@@ -6,8 +6,12 @@ import io.github.likeelysia.formalagent.conversation.ConversationService;
 import io.github.likeelysia.formalagent.exception.AgentException;
 import io.github.likeelysia.formalagent.service.AssistantService;
 import io.github.likeelysia.formalagent.service.UserScopeFactory;
+import io.github.likeelysia.formalagent.usage.UsageService;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +45,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequestMapping("/api")
 public class AgentStreamController {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentStreamController.class);
+
     /** SseEmitter 的超时:多轮工具调用 + 慢模型可能跑很久,给足 5 分钟。 */
     private static final long TIMEOUT_MS = 5 * 60 * 1000L;
 
@@ -49,6 +55,9 @@ public class AgentStreamController {
     private final SseStreamer streams;
     private final UserScopeFactory users;
     private final CurrentUser currentUser;
+
+    @Autowired(required = false)
+    private UsageService usage;
 
     public AgentStreamController(AssistantService assistant, ConversationService conversations,
                                  SseStreamer streams) {
@@ -79,13 +88,15 @@ public class AgentStreamController {
         ConversationService conversations = users == null ? this.conversations
                 : users.of(currentUser.id(auth)).conversations();
         String conversationId = conversations.requireExisting(req.conversationId());
+        String owner = currentUser == null ? null : currentUser.id(auth);
+        if (usage != null && owner != null) usage.check(owner, currentUser.admin(auth), 1);
 
         SseEmitter emitter = newEmitter();
         AtomicBoolean cancelled = new AtomicBoolean(false);
         emitter.onCompletion(() -> cancelled.set(true));
         emitter.onTimeout(() -> cancelled.set(true));
         emitter.onError(error -> cancelled.set(true));
-        streams.start(emitter, out -> pipe(assistant, out, conversationId, req.question(), cancelled, req.webSearch()),
+        streams.start(emitter, out -> pipe(assistant, out, conversationId, req.question(), owner, cancelled, req.webSearch()),
                 () -> cancelled.set(true));
         return emitter;
     }
@@ -104,7 +115,8 @@ public class AgentStreamController {
     }
 
     /** 真正的推送:把 StreamSink 的三个动作翻译成 SSE 事件,结束时补一条 done。 */
-    private void pipe(AssistantService assistant, SseEmitter out, String conversationId, String question, AtomicBoolean cancelled, boolean webSearch) {
+    private void pipe(AssistantService assistant, SseEmitter out, String conversationId, String question,
+                      String owner, AtomicBoolean cancelled, boolean webSearch) {
         SseStreamer.sendEvent(out, "meta", Map.of("conversationId", conversationId));
 
         StreamSink sink = new StreamSink() {
@@ -128,12 +140,23 @@ public class AgentStreamController {
                 return cancelled.get();
             }
         };
-        AssistantService.Turn turn = webSearch
-                ? assistant.askStream(conversationId, question, sink, true)
-                : assistant.askStream(conversationId, question, question, sink);
-
-        AgentResult result = turn.result();
-        SseStreamer.sendEvent(out, "done", new AgentController.AgentResponse(
-                result.answer(), result.steps(), result.trace(), turn.conversationId()));
+        String answer = null;
+        try {
+            AssistantService.Turn turn = webSearch
+                    ? assistant.askStream(conversationId, question, sink, true)
+                    : assistant.askStream(conversationId, question, question, sink);
+            AgentResult result = turn.result();
+            answer = result.answer();
+            SseStreamer.sendEvent(out, "done", new AgentController.AgentResponse(
+                    result.answer(), result.steps(), result.trace(), turn.conversationId()));
+        } finally {
+            if (usage != null && owner != null) {
+                try {
+                    usage.record(owner, 1, question, answer);
+                } catch (RuntimeException e) {
+                    log.warn("流式用量记账失败 owner={}: {}", owner, e.getMessage());
+                }
+            }
+        }
     }
 }
